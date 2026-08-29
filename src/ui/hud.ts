@@ -1,17 +1,14 @@
 import type { DiceSet } from '../assets';
 import { DIE_TYPES, type DieType } from '../dice/values';
+import { RESULT_MODES, type Outcome, type ResultMode, type Roll } from '../dice/outcome';
 import type { DragState } from '../input/throw-input';
-
-export interface RollResult {
-  total: number;
-  rolls: { type: DieType; value: number }[];
-}
 
 export interface HudCallbacks {
   onPoolChange(pool: DieType[]): void;
   onRoll(): void;
   onSetChange(setId: string): void;
   onSoundToggle(enabled: boolean): void;
+  onModeChange(mode: ResultMode): void;
 }
 
 const MAX_POOL = 12;
@@ -35,6 +32,8 @@ export class Hud {
   private readonly loader = document.getElementById('loader') as HTMLElement;
 
   private readonly pickerButtons = new Map<DieType, { button: HTMLButtonElement; badge: HTMLElement }>();
+  private readonly modes = document.getElementById('modes') as HTMLElement;
+  private mode: ResultMode = 'sum';
 
   private aim: SVGSVGElement | null = null;
   private aimLine: SVGLineElement | null = null;
@@ -44,6 +43,7 @@ export class Hud {
   constructor(callbacks: HudCallbacks) {
     this.callbacks = callbacks;
     this.buildPicker();
+    this.buildModes();
     this.buildAim();
     this.renderPool();
 
@@ -74,6 +74,31 @@ export class Hud {
       this.picker.appendChild(button);
       this.pickerButtons.set(type, { button, badge });
     }
+  }
+
+  private buildModes() {
+    for (const mode of RESULT_MODES) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'mode-button' + (mode.id === this.mode ? ' active' : '');
+      button.textContent = mode.label;
+      button.title = mode.description;
+      button.setAttribute('aria-pressed', String(mode.id === this.mode));
+      button.addEventListener('click', () => {
+        this.mode = mode.id;
+        this.modes.querySelectorAll('.mode-button').forEach((el, index) => {
+          const active = RESULT_MODES[index].id === mode.id;
+          el.classList.toggle('active', active);
+          el.setAttribute('aria-pressed', String(active));
+        });
+        this.callbacks.onModeChange(mode.id);
+      });
+      this.modes.appendChild(button);
+    }
+  }
+
+  getMode(): ResultMode {
+    return this.mode;
   }
 
   buildSwatches(sets: DiceSet[], activeId: string) {
@@ -235,37 +260,36 @@ export class Hud {
     this.clearButton.disabled = empty;
   }
 
-  showResult(result: RollResult) {
-    const { total, rolls } = result;
-    this.revealTotal.textContent = String(total);
+  showResult(rolls: Roll[], outcome: Outcome) {
+    this.revealTotal.textContent = String(outcome.value);
     this.revealTotal.classList.remove('crit', 'fumble');
+    if (outcome.critical) this.revealTotal.classList.add('crit');
+    else if (outcome.fumble) this.revealTotal.classList.add('fumble');
 
-    // A lone d20 gets the natural-20 treatment; anything else just reads its total.
-    const single = rolls.length === 1 ? rolls[0] : null;
-    if (single?.type === 'd20' && single.value === 20) {
-      this.revealTotal.classList.add('crit');
-      this.revealCaption.textContent = 'critical';
-    } else if (single?.type === 'd20' && single.value === 1) {
-      this.revealTotal.classList.add('fumble');
-      this.revealCaption.textContent = 'fumble';
-    } else {
-      this.revealCaption.textContent = describePool(rolls);
-    }
+    if (outcome.critical) this.revealCaption.textContent = 'critical';
+    else if (outcome.fumble) this.revealCaption.textContent = 'fumble';
+    else this.revealCaption.textContent = describeRoll(rolls, outcome.mode);
 
+    // With more than one die the breakdown is the only place the dropped dice are
+    // accounted for, which is the whole point of highest and lowest.
     this.revealBreakdown.textContent = '';
     if (rolls.length > 1) {
-      for (const roll of rolls) {
+      rolls.forEach((roll, index) => {
         const chip = document.createElement('span');
-        // In a mixed pool the big total stays neutral, so mark the notable die
-        // on its own chip — a natural 20 buried in a sum is worth seeing.
+        if (outcome.keptIndex >= 0) {
+          chip.classList.add(index === outcome.keptIndex ? 'kept' : 'dropped');
+        }
+        // Mark a natural roll on its own chip too — in a sum it would otherwise
+        // disappear into the total.
         if (roll.type === 'd20' && roll.value === 20) chip.classList.add('crit');
         else if (roll.type === 'd20' && roll.value === 1) chip.classList.add('fumble');
+
         chip.append(document.createTextNode(`${roll.type} `));
         const value = document.createElement('b');
         value.textContent = String(roll.value);
         chip.appendChild(value);
         this.revealBreakdown.appendChild(chip);
-      }
+      });
     }
 
     // Restart the CSS animation from the top.
@@ -290,10 +314,13 @@ export class Hud {
   }
 }
 
-function describePool(rolls: { type: DieType; value: number }[]): string {
+function describeRoll(rolls: Roll[], mode: ResultMode): string {
   if (rolls.length === 0) return '';
-  if (rolls.length === 1) return rolls[0].type;
   const counts = new Map<DieType, number>();
   for (const roll of rolls) counts.set(roll.type, (counts.get(roll.type) ?? 0) + 1);
-  return [...counts.entries()].map(([type, count]) => `${count}${type}`).join(' + ');
+  const pool =
+    rolls.length === 1 ? rolls[0].type : [...counts.entries()].map(([type, count]) => `${count}${type}`).join(' + ');
+
+  if (mode === 'sum' || rolls.length === 1) return pool;
+  return `${pool} · ${mode}`;
 }

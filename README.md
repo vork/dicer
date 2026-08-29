@@ -14,6 +14,12 @@ on, up to twelve; the button carries a running count and each pool chip is a −
 stepper. Then click or tap anywhere to throw. Swipe instead and the direction and
 speed of the flick become the direction and force of the throw.
 
+**Sum / Highest / Lowest** decides how the pool collapses into the one number that
+gets flashed. Highest and lowest are advantage and disadvantage: the dice that did
+not count stay in the breakdown, dimmed and struck through, and a natural 20 or 1
+is judged on the die that actually counted — a 20 you dropped to disadvantage is
+not a critical.
+
 ## How the numbers are detected
 
 The dice come from a Sketchfab set (`RPG Dice Set` by ghosted, CC-BY-4.0) with the
@@ -43,7 +49,8 @@ which face, so that mapping had to be recovered.
      This is what pinned down the dotted 6/9 pairs, which are genuinely ambiguous by
      eye — two of them were initially transposed.
    - Every slot must read back as itself from every yaw, through the same
-     `src/dice/read.ts` the app uses.
+     `src/dice/read.ts` the app uses, alongside a table of cases for how a pool
+     collapses under sum, highest and lowest.
    - 150 simulated rolls per die type must all settle inside the tray, land flat on
      the floor, and cover every face, plus a full twelve-die pool to stress
      contacts.
@@ -59,6 +66,7 @@ src/
   dice/
     values.ts            face -> printed number, per die type
     read.ts              which slot is pointing up
+    outcome.ts           pool -> the one number to flash
   input/throw-input.ts   pointer gesture -> world throw vector
   physics/dice-world.ts  Rapier world, tray colliders, settle detection
   scene/

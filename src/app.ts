@@ -11,6 +11,7 @@ import { ThrowInput } from './input/throw-input';
 import { Hud } from './ui/hud';
 import { DiceAudio } from './audio';
 import type { DieType } from './dice/values';
+import { resolveRoll, type ResultMode } from './dice/outcome';
 
 /** How long the close-up holds after the dice stop before easing back out. */
 const REVEAL_HOLD_SECONDS = 2.4;
@@ -39,6 +40,7 @@ export class App {
   private diceMaterial!: THREE.MeshPhysicalMaterial;
 
   private activeSet!: DiceSet;
+  private resultMode: ResultMode = 'sum';
   /** Guards against out-of-order colourway loads. */
   private setRequest = 0;
   private revealTimer = 0;
@@ -112,7 +114,11 @@ export class App {
       onRoll: () => this.rollFromButton(),
       onSetChange: (id) => void this.selectSet(id),
       onSoundToggle: (enabled) => this.audio.setEnabled(enabled),
+      onModeChange: (mode) => {
+        this.resultMode = mode;
+      },
     });
+    this.resultMode = this.hud.getMode();
     this.hud.buildSwatches(this.assets.sets, this.activeSet.id);
 
     this.input = new ThrowInput(this.canvas, this.director.camera);
@@ -214,11 +220,9 @@ export class App {
 
   private onSettled() {
     const rolls = this.diceWorld.values();
-    const total = rolls.reduce((sum, roll) => sum + roll.value, 0);
-    this.hud.showResult({ total, rolls });
-
-    const critical = rolls.length === 1 && rolls[0].type === 'd20' && rolls[0].value === 20;
-    this.audio.reveal(critical);
+    const outcome = resolveRoll(rolls, this.resultMode);
+    this.hud.showResult(rolls, outcome);
+    this.audio.reveal(outcome.critical);
 
     this.revealing = true;
     this.revealTimer = 0;
@@ -239,6 +243,9 @@ export class App {
       roll: (x: number, z: number, power: number) => this.throwDice(new THREE.Vector2(x, z), power),
       setPool: (pool: DieType[]) => this.hud.setPool(pool),
       setSet: (id: string) => this.selectSet(id),
+      setMode: (mode: ResultMode) => {
+        this.resultMode = mode;
+      },
       state: () => ({
         rolling: this.diceWorld.isRolling,
         settled: this.diceWorld.allSettled,

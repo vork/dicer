@@ -173,6 +173,24 @@ body {
   font-weight: 600;
 }
 
+/* Under highest/lowest, the dice that did not count recede but stay readable —
+   seeing what was dropped is the point of the mode. */
+.reveal-breakdown span.dropped {
+  opacity: 0.42;
+}
+
+.reveal-breakdown span.dropped b {
+  color: var(--ink-dim);
+  font-weight: 400;
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.reveal-breakdown span.kept {
+  border-color: rgba(244, 241, 234, 0.4);
+  background: rgba(24, 24, 30, 0.8);
+}
+
 .reveal-breakdown span.crit {
   border-color: rgba(233, 200, 119, 0.6);
   box-shadow: 0 0 18px rgba(233, 200, 119, 0.22);
@@ -380,7 +398,46 @@ body {
 }
 
 .control-row.secondary {
-  justify-content: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* Segmented control: sum / highest / lowest. */
+.modes {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+  overflow: hidden;
+}
+
+.mode-button {
+  padding: 7px 12px;
+  border: 0;
+  border-left: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-dim);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 180ms ease, background 180ms ease;
+}
+
+.mode-button:first-child {
+  border-left: 0;
+}
+
+.mode-button:hover {
+  color: var(--ink);
+}
+
+.mode-button.active {
+  color: var(--gold);
+  background: rgba(233, 200, 119, 0.12);
 }
 
 .picker {

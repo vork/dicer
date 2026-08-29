@@ -69,6 +69,16 @@ try {
   );
 
   if (args.set) await page.evaluate((id) => window.dicer.debug.setSet(id), args.set);
+  if (args.mode) {
+    await page.evaluate((mode) => {
+      // Click the real control so the UI state and the app agree.
+      const button = [...document.querySelectorAll('#modes .mode-button')].find(
+        (b) => b.textContent.trim().toLowerCase() === mode,
+      );
+      if (button) button.click();
+      else window.dicer.debug.setMode(mode);
+    }, args.mode);
+  }
   await page.evaluate((p) => window.dicer.debug.setPool(p), pool);
   await frames(24);
   await shot('idle');

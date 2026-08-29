@@ -10,6 +10,7 @@
       import * as THREE from 'three';
       import { readDie, readDirectionsFor } from '/src/dice/read.ts';
       import { DIE_TYPES, FACE_VALUES, DIE_SIDES } from '/src/dice/values.ts';
+      import { resolveRoll } from '/src/dice/outcome.ts';
 
       const info = await (await fetch('/dice/faces.json')).json();
       const lines = [];
@@ -56,6 +57,50 @@
         );
         lines.push(`      smallest margin to runner-up: ${worstMargin.toFixed(3)}`);
       }
+
+      // --- how a pool collapses to one number ---
+      const d = (type, value) => ({ type, value });
+      const cases = [
+        ['sum of a mixed pool', [d('d20', 7), d('d6', 3), d('d6', 2)], 'sum', { value: 12, keptIndex: -1 }],
+        ['sum of nothing', [], 'sum', { value: 0, keptIndex: -1 }],
+        ['advantage keeps the better d20', [d('d20', 4), d('d20', 17)], 'highest', { value: 17, keptIndex: 1 }],
+        ['disadvantage keeps the worse d20', [d('d20', 4), d('d20', 17)], 'lowest', { value: 4, keptIndex: 0 }],
+        ['a tie keeps the first die', [d('d6', 5), d('d6', 5)], 'highest', { value: 5, keptIndex: 0 }],
+        ['highest of one die is that die', [d('d8', 3)], 'highest', { value: 3, keptIndex: 0 }],
+        ['highest spans mixed types', [d('d6', 6), d('d20', 2)], 'highest', { value: 6, keptIndex: 0 }],
+      ];
+
+      for (const [name, rolls, mode, expected] of cases) {
+        const outcome = resolveRoll(rolls, mode);
+        if (outcome.value !== expected.value || outcome.keptIndex !== expected.keptIndex) {
+          failures.push(
+            `${name}: got value ${outcome.value} keptIndex ${outcome.keptIndex}, ` +
+              `expected ${expected.value} / ${expected.keptIndex}`,
+          );
+        }
+      }
+
+      // Natural rolls are judged on the die that actually counted.
+      const naturalCases = [
+        ['a kept natural 20 is critical', [d('d20', 1), d('d20', 20)], 'highest', true, false],
+        ['a dropped natural 20 is not', [d('d20', 1), d('d20', 20)], 'lowest', false, true],
+        ['a natural 20 inside a sum is not', [d('d20', 20), d('d6', 3)], 'sum', false, false],
+        ['a lone natural 20 is critical', [d('d20', 20)], 'sum', true, false],
+        ['a lone natural 1 is a fumble', [d('d20', 1)], 'sum', false, true],
+        ['a d6 showing 1 is not a fumble', [d('d6', 1)], 'sum', false, false],
+      ];
+
+      for (const [name, rolls, mode, critical, fumble] of naturalCases) {
+        const outcome = resolveRoll(rolls, mode);
+        if (outcome.critical !== critical || outcome.fumble !== fumble) {
+          failures.push(
+            `${name}: got critical ${outcome.critical} fumble ${outcome.fumble}, ` +
+              `expected ${critical} / ${fumble}`,
+          );
+        }
+      }
+
+      lines.push(`pool resolution: ${cases.length + naturalCases.length} cases checked`);
 
       document.getElementById('out').textContent = lines.join('\n');
       window.__result = { lines, failures };
