@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import RAPIER from '@dimforge/rapier3d-compat';
+import type RAPIER from '@dimforge/rapier3d-compat';
 
 import { loadDiceAssets, loadSetTextures, type DiceAssets, type DiceSet } from './assets';
 import { createEnvironment, createLights } from './scene/environment';
@@ -15,6 +15,12 @@ import type { DieType } from './dice/values';
 /** How long the close-up holds after the dice stop before easing back out. */
 const REVEAL_HOLD_SECONDS = 2.4;
 
+async function loadRapier(): Promise<typeof RAPIER> {
+  const module = await import('@dimforge/rapier3d-compat');
+  await module.default.init();
+  return module.default;
+}
+
 export class App {
   private readonly canvas: HTMLCanvasElement;
   private readonly renderer: THREE.WebGLRenderer;
@@ -24,6 +30,7 @@ export class App {
   private readonly bounds = new THREE.Sphere();
   private readonly audio = new DiceAudio();
 
+  private rapier!: typeof RAPIER;
   private assets!: DiceAssets;
   private diceWorld!: DiceWorld;
   private postFx!: PostFx;
@@ -32,6 +39,8 @@ export class App {
   private diceMaterial!: THREE.MeshPhysicalMaterial;
 
   private activeSet!: DiceSet;
+  /** Guards against out-of-order colourway loads. */
+  private setRequest = 0;
   private revealTimer = 0;
   private revealing = false;
   private running = false;
@@ -59,8 +68,11 @@ export class App {
   }
 
   async start() {
-    await RAPIER.init();
-    this.assets = await loadDiceAssets();
+    // Rapier inlines its wasm as base64, which is most of the bundle. Importing it
+    // dynamically puts it in its own chunk that loads alongside the dice assets.
+    const [rapier, assets] = await Promise.all([loadRapier(), loadDiceAssets()]);
+    this.rapier = rapier;
+    this.assets = assets;
     this.activeSet = this.assets.sets[0];
 
     const environment = createEnvironment(this.renderer);
@@ -78,16 +90,18 @@ export class App {
       roughness: 1,
       metalness: 0,
       // Cast resin: a clear coat over a pigmented, slightly translucent body.
-      clearcoat: 0.85,
-      clearcoatRoughness: 0.12,
+      // A near-mirror clearcoat put a blown highlight across whole faces and hid
+      // the very numbers the reveal is meant to show; this spreads it out.
+      clearcoat: 0.62,
+      clearcoatRoughness: 0.26,
       sheen: 0.2,
       sheenRoughness: 0.4,
-      envMapIntensity: 1.25,
+      envMapIntensity: 1.1,
       normalScale: new THREE.Vector2(0.85, 0.85),
     });
     await this.applySet(this.activeSet);
 
-    this.diceWorld = new DiceWorld(RAPIER, this.assets, this.diceMaterial);
+    this.diceWorld = new DiceWorld(this.rapier, this.assets, this.diceMaterial);
     this.scene.add(this.diceWorld.group);
 
     this.postFx = createPostFx(this.renderer, this.scene, this.director.camera);
@@ -120,7 +134,19 @@ export class App {
   }
 
   private async applySet(set: DiceSet) {
+    const request = ++this.setRequest;
     const maps = await loadSetTextures(set, this.renderer.capabilities.getMaxAnisotropy());
+
+    // Two quick taps on the colour swatches race each other, and whichever
+    // download finishes last would otherwise win regardless of what was clicked
+    // last. Drop anything that has been superseded.
+    if (request !== this.setRequest) {
+      maps.map.dispose();
+      maps.roughnessMap.dispose();
+      maps.normalMap.dispose();
+      return;
+    }
+
     this.diceMaterial.map?.dispose();
     this.diceMaterial.roughnessMap?.dispose();
     this.diceMaterial.normalMap?.dispose();
@@ -128,12 +154,12 @@ export class App {
     this.diceMaterial.roughnessMap = maps.roughnessMap;
     this.diceMaterial.normalMap = maps.normalMap;
     this.diceMaterial.needsUpdate = true;
+    this.activeSet = set;
   }
 
   private async selectSet(id: string) {
     const set = this.assets.sets.find((s) => s.id === id);
     if (!set || set.id === this.activeSet.id) return;
-    this.activeSet = set;
     await this.applySet(set);
   }
 
@@ -167,7 +193,7 @@ export class App {
     const delta = Math.min(this.clock.getDelta(), 0.05);
 
     const { impacts, justSettled } = this.diceWorld.step(delta);
-    for (const impact of impacts) this.audio.impact(impact.strength);
+    for (const impact of impacts) this.audio.impact(impact.strength, impact.pan);
 
     if (justSettled) this.onSettled();
 

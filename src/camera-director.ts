@@ -95,9 +95,17 @@ export class CameraDirector {
     let radius = pose.frameRadius;
     if (this.mode === 'rolling') radius = Math.max(pose.frameRadius, bounds.radius * 1.55);
     if (this.mode === 'reveal') {
-      radius = Math.max(pose.frameRadius, bounds.radius * 1.9);
+      // Has to hold every die, but capped: a pair that ends up in opposite corners
+      // would otherwise pull the shot back out to the wide idle framing and there
+      // would be no push-in left to see.
+      radius = THREE.MathUtils.clamp(bounds.radius * 1.3, pose.frameRadius, 5.2);
       this.revealTime += dt;
     }
+
+    // A tall, narrow viewport fits the tray by width and leaves the frame
+    // half empty. Looking down more squares the tray's projected shape up with
+    // the screen's, so it fills the frame instead of floating in a band.
+    const portraitLift = THREE.MathUtils.clamp((1 - this.camera.aspect) * 0.45, 0, 0.28);
 
     let fov = pose.fov;
     if (this.mode === 'reveal') {
@@ -117,7 +125,7 @@ export class CameraDirector {
     this.target.z = damp(this.target.z, this.desiredTarget.z, pose.followRate, dt);
     this.distance = damp(this.distance, this.desiredDistance, pose.dollyRate, dt);
     this.yaw = damp(this.yaw, desiredYaw, pose.orbitRate, dt);
-    this.pitch = damp(this.pitch, pose.pitch, pose.orbitRate, dt);
+    this.pitch = damp(this.pitch, pose.pitch + portraitLift, pose.orbitRate, dt);
     this.fov = damp(this.fov, fov, pose.dollyRate, dt);
     this.compose = damp(this.compose, pose.compose, pose.dollyRate, dt);
 

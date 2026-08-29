@@ -242,15 +242,6 @@ export class Hud {
     setTimeout(() => this.loader.remove(), 800);
     if (!this.hasRolled) this.hint.classList.remove('hidden');
   }
-
-  showError(message: string) {
-    this.loader.classList.remove('done');
-    this.loader.textContent = '';
-    const text = document.createElement('div');
-    text.className = 'loader-text';
-    text.textContent = message;
-    this.loader.appendChild(text);
-  }
 }
 
 function describePool(rolls: { type: DieType; value: number }[]): string {

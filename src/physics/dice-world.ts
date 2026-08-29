@@ -11,7 +11,7 @@ import { TRAY } from '../scene/tray';
  * true scale is what makes the dice feel like dense little objects rather than
  * balloons: they accelerate hard, land dead, and stop spinning fast.
  */
-export const GRAVITY = 490;
+const GRAVITY = 490;
 
 /** Fixed physics step. Fast dice cross a die-width per 1/60s, so we substep. */
 const FIXED_DT = 1 / 180;
@@ -30,22 +30,21 @@ const MAX_SUBSTEPS = 8;
  */
 const TIME_SCALE = 1.7;
 
-/** Rest thresholds, in units/s and rad/s. */
+/** Rest thresholds, in units/s and rad/s, held for this long before reading. */
 const REST_LINEAR = 0.4;
 const REST_ANGULAR = 0.55;
-const REST_FRAMES = 14;
+const REST_SECONDS = 0.22;
 
 /** A face this far off vertical means the die is leaning on a wall or a neighbour. */
 const COCKED_DOT = 0.965;
 const MAX_UNCOCK_NUDGES = 4;
 
 export interface Die {
-  id: number;
   type: DieType;
   body: RAPIER.RigidBody;
   mesh: THREE.Mesh;
   settled: boolean;
-  restFrames: number;
+  restSeconds: number;
   nudges: number;
   value: number | null;
   /** Local-space directions to test against world up: face normals, or hull corners for a d4. */
@@ -55,7 +54,8 @@ export interface Die {
 
 export interface Impact {
   strength: number;
-  position: THREE.Vector3;
+  /** Sideways position across the tray, -1..1, for stereo placement. */
+  pan: number;
 }
 
 export interface StepResult {
@@ -71,13 +71,13 @@ export class DiceWorld {
 
   private readonly rapier: typeof RAPIER;
   private readonly assets: DiceAssets;
-  private material: THREE.Material;
+  private readonly material: THREE.Material;
   private accumulator = 0;
-  private nextId = 1;
   private rolling = false;
   private settleReported = true;
   private readonly scratchQuaternion = new THREE.Quaternion();
   private readonly scratchVector = new THREE.Vector3();
+  private readonly scratchBox = new THREE.Box3();
 
   constructor(rapier: typeof RAPIER, assets: DiceAssets, material: THREE.Material) {
     this.rapier = rapier;
@@ -134,11 +134,6 @@ export class DiceWorld {
         .setFriction(0.7),
       staticBody,
     );
-  }
-
-  setMaterial(material: THREE.Material) {
-    this.material = material;
-    for (const die of this.dice) die.mesh.material = material;
   }
 
   get isRolling() {
@@ -215,12 +210,11 @@ export class DiceWorld {
     const readDirections = readDirectionsFor(type, info);
 
     return {
-      id: this.nextId++,
       type,
       body,
       mesh,
       settled: false,
-      restFrames: 0,
+      restSeconds: 0,
       nudges: 0,
       value: null,
       readDirections,
@@ -250,7 +244,7 @@ export class DiceWorld {
     const originZ = -heading.y * TRAY.innerDepth * 0.3;
 
     this.dice.forEach((die, index) => {
-      const jitter = 0.85;
+      const jitter = 0.6;
       const angle = (index / Math.max(1, this.dice.length)) * Math.PI * 2;
       const x = originX + Math.cos(angle) * jitter + (Math.random() - 0.5) * 0.5;
       const z = originZ + Math.sin(angle) * jitter + (Math.random() - 0.5) * 0.5;
@@ -259,7 +253,7 @@ export class DiceWorld {
       die.body.setTranslation({ x, y, z }, true);
       die.body.setRotation(randomQuaternion(), true);
 
-      const spread = (Math.random() - 0.5) * 0.34;
+      const spread = (Math.random() - 0.5) * 0.22;
       const cos = Math.cos(spread);
       const sin = Math.sin(spread);
       const dx = heading.x * cos - heading.y * sin;
@@ -281,10 +275,13 @@ export class DiceWorld {
       die.body.wakeUp();
 
       die.settled = false;
-      die.restFrames = 0;
+      die.restSeconds = 0;
       die.nudges = 0;
       die.value = null;
-      die.previousSpeed = speed;
+      // Seed from the real launch speed so the first frame's velocity change is
+      // zero and does not register as a phantom collision.
+      const velocity = die.body.linvel();
+      die.previousSpeed = Math.hypot(velocity.x, velocity.y, velocity.z);
     });
 
     this.rolling = true;
@@ -316,7 +313,7 @@ export class DiceWorld {
         const t = die.body.translation();
         impacts.push({
           strength: THREE.MathUtils.clamp(deceleration / 34, 0, 1),
-          position: new THREE.Vector3(t.x, t.y, t.z),
+          pan: THREE.MathUtils.clamp(t.x / (TRAY.innerWidth / 2), -1, 1),
         });
       }
       die.previousSpeed = speed;
@@ -326,19 +323,19 @@ export class DiceWorld {
         die.body.setTranslation({ x: 0, y: TRAY.floorY + 6, z: 0 }, true);
         die.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
         die.settled = false;
-        die.restFrames = 0;
+        die.restSeconds = 0;
         continue;
       }
 
       if (speed < REST_LINEAR && spin < REST_ANGULAR) {
-        die.restFrames++;
+        die.restSeconds += delta;
       } else {
-        die.restFrames = 0;
+        die.restSeconds = 0;
         die.settled = false;
         die.value = null;
       }
 
-      if (!die.settled && die.restFrames >= REST_FRAMES) {
+      if (!die.settled && die.restSeconds >= REST_SECONDS) {
         const reading = this.read(die);
         if (reading.dot < COCKED_DOT && die.nudges < MAX_UNCOCK_NUDGES) {
           this.nudge(die);
@@ -371,7 +368,7 @@ export class DiceWorld {
   /** Topples a die that came to rest against a wall or on top of another. */
   private nudge(die: Die) {
     die.nudges++;
-    die.restFrames = 0;
+    die.restSeconds = 0;
     const kick = 3.4 + die.nudges * 1.2;
     die.body.setLinvel({ x: (Math.random() - 0.5) * kick, y: kick, z: (Math.random() - 0.5) * kick }, true);
     die.body.setAngvel(
@@ -397,7 +394,7 @@ export class DiceWorld {
       target.radius = Math.max(TRAY.innerWidth, TRAY.innerDepth) * 0.5;
       return target;
     }
-    const box = new THREE.Box3();
+    const box = this.scratchBox.makeEmpty();
     for (const die of this.dice) {
       const t = die.body.translation();
       const radius = this.assets.info[die.type].radius;

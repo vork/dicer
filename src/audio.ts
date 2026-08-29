@@ -18,10 +18,6 @@ export class DiceAudio {
     }
   }
 
-  get isEnabled() {
-    return this.enabled;
-  }
-
   /** Must be called from a user gesture; browsers block audio otherwise. */
   resume() {
     if (!this.context) this.init();
@@ -46,8 +42,11 @@ export class DiceAudio {
     this.noise = buffer;
   }
 
-  /** @param strength 0..1 */
-  impact(strength: number) {
+  /**
+   * @param strength 0..1
+   * @param pan -1..1, where the die hit across the tray
+   */
+  impact(strength: number, pan = 0) {
     if (!this.enabled) return;
     if (!this.context) this.init();
     const context = this.context;
@@ -77,7 +76,9 @@ export class DiceAudio {
     clickGain.gain.setValueAtTime(0, now);
     clickGain.gain.linearRampToValueAtTime(0.42 * level, now + 0.003);
     clickGain.gain.exponentialRampToValueAtTime(0.0001, now + clickDuration);
-    source.connect(band).connect(clickGain).connect(master);
+    const placement = context.createStereoPanner();
+    placement.pan.value = Math.max(-1, Math.min(1, pan)) * 0.6;
+    source.connect(band).connect(clickGain).connect(placement).connect(master);
     source.start(now, Math.random() * 1.5, clickDuration + 0.02);
 
     // Body: a short low sine, only on hits with real force behind them.

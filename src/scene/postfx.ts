@@ -84,7 +84,6 @@ const GradeShader = {
 };
 
 export interface PostFx {
-  composer: EffectComposer;
   setSize(width: number, height: number, pixelRatio: number): void;
   render(delta: number): void;
   /** 0 = neutral, 1 = tightened for the reveal. */
@@ -101,7 +100,7 @@ export function createPostFx(
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
 
-  const bloom = new UnrealBloomPass(size, 0.5, 0.72, 0.9);
+  const bloom = new UnrealBloomPass(size, 0.45, 0.72, 0.95);
   composer.addPass(bloom);
 
   composer.addPass(new OutputPass());
@@ -113,7 +112,6 @@ export function createPostFx(
   let time = 0;
 
   return {
-    composer,
     setSize(width, height, pixelRatio) {
       composer.setPixelRatio(pixelRatio);
       composer.setSize(width, height);
