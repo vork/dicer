@@ -1,0 +1,239 @@
+import * as THREE from 'three';
+import RAPIER from '@dimforge/rapier3d-compat';
+
+import { loadDiceAssets, loadSetTextures, type DiceAssets, type DiceSet } from './assets';
+import { createEnvironment, createLights } from './scene/environment';
+import { createTray, TRAY } from './scene/tray';
+import { createPostFx, type PostFx } from './scene/postfx';
+import { DiceWorld } from './physics/dice-world';
+import { CameraDirector } from './camera-director';
+import { ThrowInput } from './input/throw-input';
+import { Hud } from './ui/hud';
+import { DiceAudio } from './audio';
+import type { DieType } from './dice/values';
+
+/** How long the close-up holds after the dice stop before easing back out. */
+const REVEAL_HOLD_SECONDS = 2.4;
+
+export class App {
+  private readonly canvas: HTMLCanvasElement;
+  private readonly renderer: THREE.WebGLRenderer;
+  private readonly scene = new THREE.Scene();
+  private readonly director: CameraDirector;
+  private readonly clock = new THREE.Clock();
+  private readonly bounds = new THREE.Sphere();
+  private readonly audio = new DiceAudio();
+
+  private assets!: DiceAssets;
+  private diceWorld!: DiceWorld;
+  private postFx!: PostFx;
+  private hud!: Hud;
+  private input!: ThrowInput;
+  private diceMaterial!: THREE.MeshPhysicalMaterial;
+
+  private activeSet!: DiceSet;
+  private revealTimer = 0;
+  private revealing = false;
+  private running = false;
+
+  constructor(canvas: HTMLCanvasElement) {
+    this.canvas = canvas;
+    this.renderer = new THREE.WebGLRenderer({
+      canvas,
+      antialias: true,
+      powerPreference: 'high-performance',
+      stencil: false,
+    });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setSize(window.innerWidth, window.innerHeight, false);
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.28;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+    this.scene.background = new THREE.Color(0x050507);
+    this.scene.fog = new THREE.FogExp2(0x050507, 0.012);
+
+    this.director = new CameraDirector(window.innerWidth / window.innerHeight);
+  }
+
+  async start() {
+    await RAPIER.init();
+    this.assets = await loadDiceAssets();
+    this.activeSet = this.assets.sets[0];
+
+    const environment = createEnvironment(this.renderer);
+    this.scene.environment = environment;
+
+    // A die is one world unit across; a 2048 map over the tray gives it barely two
+    // shadow texels, so spend 4096 where the GPU can afford it.
+    const shadowMapSize = this.renderer.capabilities.maxTextureSize >= 8192 && window.innerWidth > 700 ? 4096 : 2048;
+    for (const light of createLights(TRAY.innerWidth, TRAY.innerDepth, shadowMapSize)) this.scene.add(light);
+
+    const tray = createTray();
+    this.scene.add(tray.group);
+
+    this.diceMaterial = new THREE.MeshPhysicalMaterial({
+      roughness: 1,
+      metalness: 0,
+      // Cast resin: a clear coat over a pigmented, slightly translucent body.
+      clearcoat: 0.85,
+      clearcoatRoughness: 0.12,
+      sheen: 0.2,
+      sheenRoughness: 0.4,
+      envMapIntensity: 1.25,
+      normalScale: new THREE.Vector2(0.85, 0.85),
+    });
+    await this.applySet(this.activeSet);
+
+    this.diceWorld = new DiceWorld(RAPIER, this.assets, this.diceMaterial);
+    this.scene.add(this.diceWorld.group);
+
+    this.postFx = createPostFx(this.renderer, this.scene, this.director.camera);
+    this.postFx.setSize(window.innerWidth, window.innerHeight, Math.min(window.devicePixelRatio, 2));
+
+    this.hud = new Hud({
+      onPoolChange: (pool) => this.setPool(pool),
+      onRoll: () => this.rollFromButton(),
+      onSetChange: (id) => void this.selectSet(id),
+      onSoundToggle: (enabled) => this.audio.setEnabled(enabled),
+    });
+    this.hud.buildSwatches(this.assets.sets, this.activeSet.id);
+
+    this.input = new ThrowInput(this.canvas, this.director.camera);
+    this.input.onThrow = ({ direction, power }) => {
+      this.audio.resume();
+      this.throwDice(direction, power);
+    };
+    this.input.onDragChange = (drag) => this.hud.updateAim(drag);
+
+    this.setPool(this.hud.getPool());
+
+    window.addEventListener('resize', this.handleResize);
+    document.addEventListener('visibilitychange', this.handleVisibility);
+
+    this.hud.hideLoader();
+    this.running = true;
+    this.clock.start();
+    this.renderer.setAnimationLoop(this.tick);
+  }
+
+  private async applySet(set: DiceSet) {
+    const maps = await loadSetTextures(set, this.renderer.capabilities.getMaxAnisotropy());
+    this.diceMaterial.map?.dispose();
+    this.diceMaterial.roughnessMap?.dispose();
+    this.diceMaterial.normalMap?.dispose();
+    this.diceMaterial.map = maps.map;
+    this.diceMaterial.roughnessMap = maps.roughnessMap;
+    this.diceMaterial.normalMap = maps.normalMap;
+    this.diceMaterial.needsUpdate = true;
+  }
+
+  private async selectSet(id: string) {
+    const set = this.assets.sets.find((s) => s.id === id);
+    if (!set || set.id === this.activeSet.id) return;
+    this.activeSet = set;
+    await this.applySet(set);
+  }
+
+  private setPool(pool: DieType[]) {
+    this.diceWorld.setPool(pool);
+    this.revealing = false;
+    this.director.setMode('idle');
+  }
+
+  private rollFromButton() {
+    this.audio.resume();
+    // Straight away from the camera, with a mid-strength throw.
+    const basis = this.director.camera.matrixWorld.elements;
+    const forward = new THREE.Vector2(-basis[8], -basis[10]);
+    if (forward.lengthSq() < 1e-8) forward.set(0, -1);
+    this.throwDice(forward.normalize(), 0.5 + Math.random() * 0.25);
+  }
+
+  private throwDice(direction: THREE.Vector2, power: number) {
+    if (this.diceWorld.dice.length === 0) return;
+    this.diceWorld.roll(direction, power);
+    this.revealing = false;
+    this.revealTimer = 0;
+    this.director.setMode('rolling');
+    this.hud.setRolling(true);
+    this.postFx.setFocus(0);
+  }
+
+  private tick = () => {
+    if (!this.running) return;
+    const delta = Math.min(this.clock.getDelta(), 0.05);
+
+    const { impacts, justSettled } = this.diceWorld.step(delta);
+    for (const impact of impacts) this.audio.impact(impact.strength);
+
+    if (justSettled) this.onSettled();
+
+    if (this.revealing) {
+      this.revealTimer += delta;
+      if (this.revealTimer > REVEAL_HOLD_SECONDS) {
+        this.revealing = false;
+        this.director.setMode('idle');
+        this.hud.setRolling(false);
+      }
+    }
+
+    this.diceWorld.getBounds(this.bounds);
+    this.director.update(delta, this.bounds);
+    this.postFx.setFocus(this.director.revealProgress);
+    this.postFx.render(delta);
+  };
+
+  private onSettled() {
+    const rolls = this.diceWorld.values();
+    const total = rolls.reduce((sum, roll) => sum + roll.value, 0);
+    this.hud.showResult({ total, rolls });
+
+    const critical = rolls.length === 1 && rolls[0].type === 'd20' && rolls[0].value === 20;
+    this.audio.reveal(critical);
+
+    this.revealing = true;
+    this.revealTimer = 0;
+    this.director.setMode('reveal');
+  }
+
+  /**
+   * Hook for the headless capture and smoke tools in tools/, so they drive the
+   * real app rather than a stand-in.
+   */
+  get debug() {
+    return {
+      three: THREE,
+      scene: this.scene,
+      renderer: this.renderer,
+      camera: this.director.camera,
+      diceMaterial: this.diceMaterial,
+      roll: (x: number, z: number, power: number) => this.throwDice(new THREE.Vector2(x, z), power),
+      setPool: (pool: DieType[]) => this.hud.setPool(pool),
+      setSet: (id: string) => this.selectSet(id),
+      state: () => ({
+        rolling: this.diceWorld.isRolling,
+        settled: this.diceWorld.allSettled,
+        revealing: this.revealing,
+        values: this.diceWorld.values(),
+      }),
+    };
+  }
+
+  private handleResize = () => {
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    const pixelRatio = Math.min(window.devicePixelRatio, 2);
+    this.renderer.setPixelRatio(pixelRatio);
+    this.renderer.setSize(width, height, false);
+    this.director.setAspect(width / height);
+    this.postFx.setSize(width, height, pixelRatio);
+  };
+
+  private handleVisibility = () => {
+    // Coming back from a background tab would otherwise deliver one huge delta.
+    if (!document.hidden) this.clock.getDelta();
+  };
+}

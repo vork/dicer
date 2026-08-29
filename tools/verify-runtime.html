@@ -1,0 +1,65 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>runtime reading check</title>
+  </head>
+  <body>
+    <pre id="out"></pre>
+    <script type="module">
+      import * as THREE from 'three';
+      import { readDie, readDirectionsFor } from '/src/dice/read.ts';
+      import { DIE_TYPES, FACE_VALUES, DIE_SIDES } from '/src/dice/values.ts';
+
+      const info = await (await fetch('/dice/faces.json')).json();
+      const lines = [];
+      const failures = [];
+      const UP = new THREE.Vector3(0, 1, 0);
+
+      for (const type of DIE_TYPES) {
+        const directions = readDirectionsFor(type, info[type]);
+        const seen = new Set();
+        let worstMargin = Infinity;
+
+        for (let slot = 0; slot < directions.length; slot++) {
+          // Rotate this slot to point straight up, then spin freely about the
+          // vertical axis: the reading must be the same from every yaw.
+          const align = new THREE.Quaternion().setFromUnitVectors(directions[slot], UP);
+          for (let yaw = 0; yaw < 8; yaw++) {
+            const spin = new THREE.Quaternion().setFromAxisAngle(UP, (yaw / 8) * Math.PI * 2);
+            const q = spin.clone().multiply(align);
+            const reading = readDie(type, directions, q);
+            if (reading.index !== slot) {
+              failures.push(`${type} slot ${slot} yaw ${yaw} read back as slot ${reading.index}`);
+            }
+            if (Math.abs(reading.dot - 1) > 1e-5) {
+              failures.push(`${type} slot ${slot} should read dot 1.0, got ${reading.dot.toFixed(4)}`);
+            }
+          }
+
+          // Margin: how far the runner-up sits below the winner. A small margin
+          // would mean a slight tilt could flip the reading.
+          const align2 = new THREE.Quaternion().setFromUnitVectors(directions[slot], UP);
+          const dots = directions
+            .map((d) => d.clone().applyQuaternion(align2).dot(UP))
+            .sort((a, b) => b - a);
+          worstMargin = Math.min(worstMargin, dots[0] - dots[1]);
+
+          seen.add(FACE_VALUES[type][slot]);
+        }
+
+        const expected = DIE_SIDES[type];
+        if (seen.size !== expected) failures.push(`${type} covers ${seen.size} distinct values, expected ${expected}`);
+
+        lines.push(
+          `${type.padEnd(4)} ${directions.length} slots, values ${[...seen].sort((a, b) => a - b).join(',')}`,
+        );
+        lines.push(`      smallest margin to runner-up: ${worstMargin.toFixed(3)}`);
+      }
+
+      document.getElementById('out').textContent = lines.join('\n');
+      window.__result = { lines, failures };
+      window.__done = true;
+    </script>
+  </body>
+</html>

@@ -1,0 +1,5 @@
+node_modules/
+dist/
+.calibration/
+*.local
+.DS_Store

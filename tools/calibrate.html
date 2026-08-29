@@ -1,0 +1,149 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>dice face calibration</title>
+    <style>
+      body { margin: 0; background: #101014; color: #eee; font: 13px monospace; }
+      canvas { display: block; }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import * as THREE from 'three';
+      import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+      const TILE = 240;
+      const LABEL = 26;
+      const GRID = { d4: 2, d6: 3, d8: 4, d10: 5, d12: 4, d20: 5 };
+
+      const params = new URLSearchParams(location.search);
+      const setId = params.get('set') || 'set7';
+      // "face": look straight down each face normal. "vertex": look down each hull
+      // vertex direction (how a d4 is actually read).
+      const mode = params.get('mode') || 'face';
+      const spin = Number(params.get('spin') || 0); // extra roll about the view axis, degrees
+      const zoom = Number(params.get('zoom') || 1.25); // ortho half-extent as a multiple of face extent
+
+      const faces = await (await fetch('/dice/faces.json')).json();
+      const sets = await (await fetch('/dice/sets.json')).json();
+      const set = sets.find((s) => s.id === setId);
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
+      renderer.setSize(TILE, TILE, false);
+      renderer.setPixelRatio(2);
+      renderer.toneMapping = THREE.NoToneMapping;
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x101014);
+      // Flat, shadowless light so glyph contrast is maximal.
+      scene.add(new THREE.AmbientLight(0xffffff, 2.6));
+      const fill = new THREE.DirectionalLight(0xffffff, 1.4);
+      fill.position.set(0, 0, 1);
+      scene.add(fill);
+
+      const textureLoader = new THREE.TextureLoader();
+      const load = (url) =>
+        new Promise((res) => textureLoader.load(url, (t) => { t.flipY = false; t.colorSpace = THREE.NoColorSpace; res(t); }));
+      const baseColor = await load('/dice/' + set.baseColor);
+      baseColor.colorSpace = THREE.SRGBColorSpace;
+
+      const gltf = await new GLTFLoader().loadAsync('/dice/dice.glb');
+      const meshes = {};
+      gltf.scene.traverse((o) => { if (o.isMesh) meshes[o.name] = o; });
+
+      const material = new THREE.MeshBasicMaterial({ map: baseColor });
+
+      const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 100);
+      camera.position.set(0, 0, 5);
+      camera.lookAt(0, 0, 0);
+
+      const results = {};
+
+      for (const [die, data] of Object.entries(faces)) {
+        const mesh = new THREE.Mesh(meshes[die].geometry, material);
+        const holder = new THREE.Group();
+        holder.add(mesh);
+        scene.add(holder);
+
+        const directions =
+          mode === 'vertex'
+            ? data.hull.map((v) => { const l = Math.hypot(...v); return [v[0] / l, v[1] / l, v[2] / l]; })
+            : data.faces.map((f) => f.normal);
+
+        const tiles = [];
+        for (let d = 0; d < directions.length; d++) {
+          const dir = directions[d];
+          // Frame the target face itself, not the whole die, so the centred glyph dominates.
+          const half =
+            mode === 'vertex' ? data.radius * zoom : data.faces[d].extent * zoom;
+          camera.left = -half; camera.right = half; camera.top = half; camera.bottom = -half;
+          camera.updateProjectionMatrix();
+
+          const q = new THREE.Quaternion().setFromUnitVectors(
+            new THREE.Vector3(dir[0], dir[1], dir[2]).normalize(),
+            new THREE.Vector3(0, 0, 1),
+          );
+          if (spin) q.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), (spin * Math.PI) / 180));
+          holder.quaternion.copy(q);
+          renderer.render(scene, camera);
+          tiles.push(renderer.domElement.toDataURL('image/png'));
+        }
+        scene.remove(holder);
+        results[die] = tiles;
+      }
+
+      // Compose labelled contact sheets.
+      const sheets = {};
+      for (const [die, tiles] of Object.entries(results)) {
+        const columns = GRID[die];
+        const rows = Math.ceil(tiles.length / columns);
+        const canvas = document.createElement('canvas');
+        canvas.width = columns * TILE;
+        canvas.height = rows * (TILE + LABEL);
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#101014';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        await Promise.all(
+          tiles.map(
+            (url, i) =>
+              new Promise((res) => {
+                const img = new Image();
+                img.onload = () => {
+                  const c = i % columns;
+                  const r = Math.floor(i / columns);
+                  ctx.drawImage(img, c * TILE, r * (TILE + LABEL) + LABEL, TILE, TILE);
+                  ctx.fillStyle = '#f5c542';
+                  ctx.fillRect(c * TILE, r * (TILE + LABEL), TILE, LABEL);
+                  ctx.fillStyle = '#101014';
+                  ctx.font = 'bold 17px monospace';
+                  ctx.textAlign = 'center';
+                  ctx.fillText(`${mode === 'vertex' ? 'vtx' : 'face'} ${i}`, c * TILE + TILE / 2, r * (TILE + LABEL) + LABEL - 7);
+                  // Crosshair on the exact face centre — the glyph it brackets is the value.
+                  const cx = c * TILE + TILE / 2;
+                  const cy = r * (TILE + LABEL) + LABEL + TILE / 2;
+                  ctx.strokeStyle = 'rgba(80,220,255,0.9)';
+                  ctx.lineWidth = 2;
+                  ctx.beginPath();
+                  ctx.moveTo(cx - 14, cy); ctx.lineTo(cx - 5, cy);
+                  ctx.moveTo(cx + 5, cy); ctx.lineTo(cx + 14, cy);
+                  ctx.moveTo(cx, cy - 14); ctx.lineTo(cx, cy - 5);
+                  ctx.moveTo(cx, cy + 5); ctx.lineTo(cx, cy + 14);
+                  ctx.stroke();
+                  res();
+                };
+                img.src = url;
+              }),
+          ),
+        );
+        sheets[die] = canvas.toDataURL('image/png');
+        document.body.appendChild(canvas);
+      }
+
+      window.__sheets = sheets;
+      window.__done = true;
+    </script>
+  </body>
+</html>

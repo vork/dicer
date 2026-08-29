@@ -1,0 +1,135 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>physics check</title>
+  </head>
+  <body>
+    <pre id="out">running…</pre>
+    <script type="module">
+      import * as THREE from 'three';
+      import RAPIER from '@dimforge/rapier3d-compat';
+      import { loadDiceAssets } from '/src/assets.ts';
+      import { DiceWorld } from '/src/physics/dice-world.ts';
+      import { DIE_SIDES, DIE_TYPES } from '/src/dice/values.ts';
+      import { TRAY } from '/src/scene/tray.ts';
+
+      const params = new URLSearchParams(location.search);
+      const trials = Number(params.get('trials') || 200);
+      const timeoutSeconds = 25;
+      const dt = 1 / 60;
+
+      await RAPIER.init();
+      const assets = await loadDiceAssets();
+      const world = new DiceWorld(RAPIER, assets, new THREE.MeshBasicMaterial());
+
+      const report = [];
+      const problems = [];
+
+      function runTrial(pool) {
+        world.setPool(pool);
+        const angle = Math.random() * Math.PI * 2;
+        world.roll(new THREE.Vector2(Math.cos(angle), Math.sin(angle)), Math.random());
+
+        let elapsed = 0;
+        while (elapsed < timeoutSeconds) {
+          const { justSettled } = world.step(dt);
+          elapsed += dt;
+          if (justSettled) break;
+        }
+        const settled = world.allSettled;
+
+        // Every die must have finished inside the tray, sitting on the floor.
+        let escaped = false;
+        for (const die of world.dice) {
+          const t = die.body.translation();
+          if (
+            Math.abs(t.x) > TRAY.innerWidth / 2 + 0.6 ||
+            Math.abs(t.z) > TRAY.innerDepth / 2 + 0.6 ||
+            t.y < TRAY.floorY - 0.3 ||
+            t.y > TRAY.floorY + TRAY.wallHeight * 2
+          ) {
+            escaped = true;
+          }
+        }
+
+        // A die resting flat sits exactly its inradius above the floor. Anything
+        // higher is perched on a neighbour or stuck on the wall.
+        let perched = false;
+        if (pool.length === 1) {
+          for (const die of world.dice) {
+            const expected = TRAY.floorY + assets.info[die.type].inradius;
+            if (Math.abs(die.body.translation().y - expected) > 0.12) perched = true;
+          }
+        }
+
+        return { settled, escaped, perched, seconds: elapsed, values: world.values().map((v) => v.value) };
+      }
+
+      // --- single die of each type: settle reliability and value distribution ---
+      for (const type of DIE_TYPES) {
+        const counts = new Map();
+        let totalSeconds = 0;
+        let slowest = 0;
+        let unsettled = 0;
+        let escapes = 0;
+        let perched = 0;
+
+        for (let i = 0; i < trials; i++) {
+          const result = runTrial([type]);
+          if (!result.settled) unsettled++;
+          if (result.escaped) escapes++;
+          if (result.perched) perched++;
+          totalSeconds += result.seconds;
+          slowest = Math.max(slowest, result.seconds);
+          for (const value of result.values) counts.set(value, (counts.get(value) ?? 0) + 1);
+        }
+
+        const sides = DIE_SIDES[type];
+        const observed = [...counts.keys()].sort((a, b) => a - b);
+        const expectedCount = trials / sides;
+        // Chi-square against a uniform die. Not a strict pass/fail at this sample
+        // size, just a check that no face is wildly over- or under-represented.
+        let chi = 0;
+        for (let v = 1; v <= sides; v++) {
+          const seen = counts.get(v) ?? 0;
+          chi += ((seen - expectedCount) ** 2) / expectedCount;
+        }
+
+        report.push(
+          `${type.padEnd(4)} settled ${trials - unsettled}/${trials}  escapes ${escapes}  perched ${perched}  ` +
+            `avg ${(totalSeconds / trials).toFixed(2)}s  max ${slowest.toFixed(2)}s  ` +
+            `faces seen ${observed.length}/${sides}  chi2 ${chi.toFixed(1)} (df ${sides - 1})`,
+        );
+
+        if (unsettled) problems.push(`${type}: ${unsettled}/${trials} rolls never settled`);
+        if (escapes) problems.push(`${type}: ${escapes}/${trials} rolls ended outside the tray`);
+        if (perched) problems.push(`${type}: ${perched}/${trials} rolls did not end flat on the floor`);
+        if (observed.length !== sides) problems.push(`${type}: only ${observed.length} of ${sides} faces ever came up`);
+      }
+
+      // --- a full mixed pool, the heaviest case for contacts ---
+      const pool = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd6', 'd6'];
+      let poolUnsettled = 0;
+      let poolEscapes = 0;
+      let poolSlowest = 0;
+      const poolTrials = Math.max(20, Math.floor(trials / 4));
+      for (let i = 0; i < poolTrials; i++) {
+        const result = runTrial(pool);
+        if (!result.settled) poolUnsettled++;
+        if (result.escaped) poolEscapes++;
+        poolSlowest = Math.max(poolSlowest, result.seconds);
+      }
+      report.push(
+        `pool of ${pool.length}: settled ${poolTrials - poolUnsettled}/${poolTrials}  ` +
+          `escapes ${poolEscapes}  max ${poolSlowest.toFixed(2)}s`,
+      );
+      if (poolUnsettled) problems.push(`mixed pool: ${poolUnsettled}/${poolTrials} rolls never settled`);
+      if (poolEscapes) problems.push(`mixed pool: ${poolEscapes}/${poolTrials} rolls ended outside the tray`);
+
+      document.getElementById('out').textContent = report.join('\n');
+      window.__result = { report, problems };
+      window.__done = true;
+    </script>
+  </body>
+</html>
