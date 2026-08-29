@@ -34,6 +34,8 @@ export class Hud {
   private readonly hint = document.getElementById('hint') as HTMLElement;
   private readonly loader = document.getElementById('loader') as HTMLElement;
 
+  private readonly pickerButtons = new Map<DieType, { button: HTMLButtonElement; badge: HTMLElement }>();
+
   private aim: SVGSVGElement | null = null;
   private aimLine: SVGLineElement | null = null;
   private aimHead: SVGPolygonElement | null = null;
@@ -59,9 +61,18 @@ export class Hud {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'die-button';
-      button.textContent = type;
+
+      const label = document.createElement('span');
+      label.textContent = type;
+      // Carries how many of this type are staged. Without it the buttons read as
+      // on/off toggles and nothing suggests that tapping again adds another die.
+      const badge = document.createElement('span');
+      badge.className = 'die-count';
+
+      button.append(label, badge);
       button.addEventListener('click', () => this.addDie(type));
       this.picker.appendChild(button);
+      this.pickerButtons.set(type, { button, badge });
     }
   }
 
@@ -149,6 +160,24 @@ export class Hud {
     this.setPool([...this.pool, type]);
   }
 
+  private removeDie(type: DieType) {
+    const next = [...this.pool];
+    const last = next.lastIndexOf(type);
+    if (last < 0) return;
+    next.splice(last, 1);
+    this.setPool(next);
+  }
+
+  /** A round −/+ control for one end of a pool chip. */
+  private stepper(glyph: string, label: string, onClick: () => void): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = glyph;
+    button.setAttribute('aria-label', label);
+    button.addEventListener('click', onClick);
+    return button;
+  }
+
   setPool(pool: DieType[]) {
     this.pool = pool;
     this.renderPool();
@@ -162,35 +191,48 @@ export class Hud {
   private renderPool() {
     this.poolRow.textContent = '';
 
-    // Collapse duplicates into "3 x d6" style chips.
     const counts = new Map<DieType, number>();
     for (const type of this.pool) counts.set(type, (counts.get(type) ?? 0) + 1);
+    const full = this.pool.length >= MAX_POOL;
 
+    // One chip per die type, as a −/+ stepper over its count.
     for (const type of DIE_TYPES) {
       const count = counts.get(type);
       if (!count) continue;
+
       const chip = document.createElement('span');
       chip.className = 'pool-chip';
-      chip.append(document.createTextNode(count > 1 ? `${count} × ${type}` : type));
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.textContent = '−';
-      remove.setAttribute('aria-label', `Remove one ${type}`);
-      remove.addEventListener('click', () => {
-        const next = [...this.pool];
-        next.splice(next.lastIndexOf(type), 1);
-        this.setPool(next);
-      });
-      chip.appendChild(remove);
+
+      const label = document.createElement('span');
+      label.className = 'pool-chip-label';
+      label.textContent = count > 1 ? `${type} × ${count}` : type;
+
+      const add = this.stepper('+', `Add one ${type}`, () => this.addDie(type));
+      add.disabled = full;
+
+      chip.append(
+        this.stepper('−', `Remove one ${type}`, () => this.removeDie(type)),
+        label,
+        add,
+      );
       this.poolRow.appendChild(chip);
+    }
+
+    for (const [type, { button, badge }] of this.pickerButtons) {
+      const count = counts.get(type) ?? 0;
+      button.classList.toggle('active', count > 0);
+      badge.textContent = count > 0 ? String(count) : '';
+      button.disabled = full;
+      button.title = full ? `Maximum ${MAX_POOL} dice` : `Add a ${type}`;
+      button.setAttribute(
+        'aria-label',
+        count > 0 ? `Add a ${type}, ${count} in the pool` : `Add a ${type}`,
+      );
     }
 
     const empty = this.pool.length === 0;
     this.rollButton.disabled = empty;
     this.clearButton.disabled = empty;
-    this.picker.querySelectorAll('.die-button').forEach((button, index) => {
-      button.classList.toggle('active', counts.has(DIE_TYPES[index]));
-    });
   }
 
   showResult(result: RollResult) {
@@ -214,6 +256,10 @@ export class Hud {
     if (rolls.length > 1) {
       for (const roll of rolls) {
         const chip = document.createElement('span');
+        // In a mixed pool the big total stays neutral, so mark the notable die
+        // on its own chip — a natural 20 buried in a sum is worth seeing.
+        if (roll.type === 'd20' && roll.value === 20) chip.classList.add('crit');
+        else if (roll.type === 'd20' && roll.value === 1) chip.classList.add('fumble');
         chip.append(document.createTextNode(`${roll.type} `));
         const value = document.createElement('b');
         value.textContent = String(roll.value);

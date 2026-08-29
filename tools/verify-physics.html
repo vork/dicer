@@ -108,8 +108,9 @@
         if (observed.length !== sides) problems.push(`${type}: only ${observed.length} of ${sides} faces ever came up`);
       }
 
-      // --- a full mixed pool, the heaviest case for contacts ---
-      const pool = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'd6', 'd6'];
+      // --- a full pool at the UI's cap, the heaviest case for contacts, and
+      // deliberately duplicate-heavy since that is how people build a pool ---
+      const pool = ['d6', 'd6', 'd6', 'd6', 'd20', 'd20', 'd4', 'd8', 'd8', 'd10', 'd12', 'd12'];
       let poolUnsettled = 0;
       let poolEscapes = 0;
       let poolSlowest = 0;

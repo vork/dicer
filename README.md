@@ -9,8 +9,10 @@ npm run assets     # rebuild public/dice/* from the source GLB (only needed once
 npm run dev
 ```
 
-Click or tap to throw. Swipe and the direction and speed of the flick become the
-direction and force of the throw.
+Tap a die type to add one to the pool — tap again for a second, a third, and so
+on, up to twelve; the button carries a running count and each pool chip is a −/+
+stepper. Then click or tap anywhere to throw. Swipe instead and the direction and
+speed of the flick become the direction and force of the throw.
 
 ## How the numbers are detected
 
@@ -43,7 +45,8 @@ which face, so that mapping had to be recovered.
    - Every slot must read back as itself from every yaw, through the same
      `src/dice/read.ts` the app uses.
    - 150 simulated rolls per die type must all settle inside the tray, land flat on
-     the floor, and cover every face.
+     the floor, and cover every face, plus a full twelve-die pool to stress
+     contacts.
 
 ## Layout
 

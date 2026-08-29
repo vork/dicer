@@ -173,6 +173,24 @@ body {
   font-weight: 600;
 }
 
+.reveal-breakdown span.crit {
+  border-color: rgba(233, 200, 119, 0.6);
+  box-shadow: 0 0 18px rgba(233, 200, 119, 0.22);
+}
+
+.reveal-breakdown span.crit b {
+  color: #ffe6ad;
+}
+
+.reveal-breakdown span.fumble {
+  border-color: rgba(255, 120, 100, 0.5);
+  box-shadow: 0 0 18px rgba(255, 90, 70, 0.18);
+}
+
+.reveal-breakdown span.fumble b {
+  color: #ffb4a6;
+}
+
 /* ---------- chrome ---------- */
 
 .topbar {
@@ -313,8 +331,8 @@ body {
 .pool-chip {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 6px 4px 10px;
+  gap: 3px;
+  padding: 4px;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.04);
@@ -338,9 +356,20 @@ body {
   padding: 0;
 }
 
-.pool-chip button:hover {
+.pool-chip button:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.16);
   color: var(--ink);
+}
+
+.pool-chip button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.pool-chip-label {
+  padding: 0 5px;
+  min-width: 46px;
+  text-align: center;
 }
 
 .control-row {
@@ -361,6 +390,10 @@ body {
 }
 
 .die-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
   min-width: 46px;
   padding: 9px 10px;
   border: 1px solid var(--line);
@@ -384,10 +417,36 @@ body {
   transform: translateY(1px);
 }
 
+/* Outlined rather than filled: with six types selectable at once, six solid
+   gold buttons overwhelm the bar. The count badge carries the emphasis. */
 .die-button.active {
-  color: #0a0a0d;
+  color: var(--gold);
+  background: rgba(233, 200, 119, 0.1);
+  border-color: rgba(233, 200, 119, 0.5);
+}
+
+.die-button:disabled {
+  opacity: 0.34;
+  cursor: default;
+}
+
+.die-count {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
   background: var(--gold);
-  border-color: var(--gold);
+  color: #14100a;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+.die-count:empty {
+  display: none;
 }
 
 .actions {
