@@ -14,6 +14,7 @@ const args = Object.fromEntries(
   }),
 );
 const trials = args.trials || '200';
+const only = args.only ? `&only=${args.only}` : '';
 
 const server = await createServer({
   root: process.cwd(),
@@ -32,7 +33,7 @@ page.on('console', (m) => { if (m.type() === 'error') console.error('[page]', m.
 
 let failed = false;
 try {
-  await page.goto(`http://127.0.0.1:5197/tools/verify-physics.html?trials=${trials}`, { waitUntil: 'load' });
+  await page.goto(`http://127.0.0.1:5197/tools/verify-physics.html?trials=${trials}${only}`, { waitUntil: 'load' });
   await page.waitForFunction('window.__done === true', { timeout: 900000 });
   const { report, problems } = await page.evaluate('window.__result');
   console.log(report.join('\n'));

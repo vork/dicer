@@ -15,7 +15,8 @@
     "calibrate": "node tools/calibrate.mjs --set set7 --mode face --zoom 0.62",
     "face-sheets": "node tools/face-sheets.mjs",
     "shoot": "node tools/shoot.mjs",
-    "diagnose": "node tools/diagnose.mjs"
+    "diagnose": "node tools/diagnose.mjs",
+    "verify:build": "node tools/verify-build.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.20.0",

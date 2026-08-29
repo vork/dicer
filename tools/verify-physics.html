@@ -16,6 +16,8 @@
 
       const params = new URLSearchParams(location.search);
       const trials = Number(params.get('trials') || 200);
+      // Narrow to one die type when you want a high-count fairness run.
+      const only = params.get('only');
       const timeoutSeconds = 25;
       const dt = 1 / 60;
 
@@ -68,6 +70,7 @@
 
       // --- single die of each type: settle reliability and value distribution ---
       for (const type of DIE_TYPES) {
+        if (only && type !== only) continue;
         const counts = new Map();
         let totalSeconds = 0;
         let slowest = 0;
@@ -110,6 +113,7 @@
 
       // --- a full pool at the UI's cap, the heaviest case for contacts, and
       // deliberately duplicate-heavy since that is how people build a pool ---
+      if (!only) {
       const pool = ['d6', 'd6', 'd6', 'd6', 'd20', 'd20', 'd4', 'd8', 'd8', 'd10', 'd12', 'd12'];
       let poolUnsettled = 0;
       let poolEscapes = 0;
@@ -127,6 +131,7 @@
       );
       if (poolUnsettled) problems.push(`mixed pool: ${poolUnsettled}/${poolTrials} rolls never settled`);
       if (poolEscapes) problems.push(`mixed pool: ${poolEscapes}/${poolTrials} rolls ended outside the tray`);
+      }
 
       document.getElementById('out').textContent = report.join('\n');
       window.__result = { report, problems };

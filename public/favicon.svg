@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#0b0b10"/>
+  <!-- d20 silhouette: outer hexagon, upper face, and the three spokes below it -->
+  <g fill="none" stroke="#e9c877" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M32 8 L53 20 L53 44 L32 56 L11 44 L11 20 Z"/>
+    <path d="M32 20 L45 27 L38 41 L26 41 L19 27 Z"/>
+    <path d="M32 8 L32 20 M11 20 L19 27 M53 20 L45 27 M26 41 L18 52 M38 41 L46 52"/>
+  </g>
+</svg>

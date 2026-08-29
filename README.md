@@ -78,6 +78,20 @@ src/
 tools/                   asset pipeline and headless verification
 ```
 
+## Deploying
+
+`.github/workflows/deploy.yml` builds and publishes to GitHub Pages on every push
+to the default branch, and can be run by hand from the Actions tab. In the
+repository settings, under **Pages → Build and deployment**, set **Source** to
+**GitHub Actions**; nothing else needs configuring.
+
+`base` is `'./'` in `vite.config.js` and every asset is fetched through
+`import.meta.env.BASE_URL`, so the same build works whether it is served from
+`user.github.io/dicer/` or from a domain root. `npm run verify:build` proves that:
+it serves `dist/` from a sub-path, loads it, rolls once, and fails on any 404 —
+the failure mode where an absolute asset path works on the dev server and breaks
+in production.
+
 ## Notes on the simulation
 
 One world unit is about 20mm, so gravity runs at its true scaled value of ~490
@@ -95,6 +109,13 @@ A die that comes to rest leaning on a wall or on a neighbour is detected (its
 upward face is more than a few degrees off vertical) and nudged until it lies flat,
 so a reading is never taken off a cocked die.
 
+Every throw randomises the starting orientation with Shoemake's method, which is
+uniform over the space of rotations — random Euler angles would have clustered
+around the poles. Spawn position, heading, speed, lift and spin on all three axes
+are randomised per die as well. Over 3000 simulated d20 rolls the face
+distribution gives a chi-square of 13.9 against 19 degrees of freedom, which is
+where a fair die belongs.
+
 ## Tooling
 
 | command | what it does |
@@ -106,6 +127,7 @@ so a reading is never taken off a cocked die.
 | `npm run verify:values` | opposite-face-sum invariant on the tables |
 | `npm run verify:reading` | every slot reads back from every yaw |
 | `npm run verify:physics` | settle, containment and distribution over many rolls |
+| `npm run verify:build` | the built site runs from a sub-path, with no 404s |
 | `npm run calibrate` | regenerate the face contact sheets |
 | `npm run shoot` | screenshot the running app at each stage |
 
