@@ -36,37 +36,44 @@
       ];
 
       /** Runs the director to a steady state on a fixed bounds sphere. */
-      function settleCamera(aspect, sphere, seconds = 6) {
+      function settleCamera(aspect, sphere, placement = -0.35, seconds = 6) {
         const director = new CameraDirector(aspect);
         director.setMode('reveal');
+        director.setSubjectPlacement(placement);
         for (let t = 0; t < seconds * 60; t++) director.update(1 / 60, sphere);
         return director.camera;
       }
+
+      // Roughly where the clear band's centre falls on each shape of screen: low
+      // on a wide desktop, near the middle on a phone whose controls are tall.
+      const PLACEMENT = { landscape: -0.5, portrait: -0.05 };
 
       for (const [viewName, aspect] of viewports) {
         for (const [spotName, x, z] of spots) {
           const centre = new THREE.Vector3(x, TRAY.floorY + DIE_RADIUS, z);
           const sphere = new THREE.Sphere(centre.clone(), DIE_RADIUS);
-          const camera = settleCamera(aspect, sphere);
+          const wanted = PLACEMENT[viewName];
+          const camera = settleCamera(aspect, sphere, wanted);
           camera.updateMatrixWorld(true);
 
-          // Project the die into normalised device coordinates. Anything outside
-          // [-1, 1] is off screen; the reveal deliberately parks the subject low,
-          // so the vertical window is offset rather than centred.
+          // Project the die into normalised device coordinates: +1 is the top of
+          // the screen, -1 the bottom, and anything past those is off screen.
           const ndc = centre.clone().project(camera);
           const label = `${viewName} / ${spotName}`;
 
-          if (Math.abs(ndc.x) > 0.42) {
-            failures.push(`${label}: die sits at x ${ndc.x.toFixed(2)} in the frame, expected near centre`);
+          if (Math.abs(ndc.x) > 0.1) {
+            failures.push(`${label}: die sits at x ${ndc.x.toFixed(2)}, expected horizontally centred`);
           }
-          if (ndc.y > 0.25 || ndc.y < -0.85) {
-            failures.push(`${label}: die sits at y ${ndc.y.toFixed(2)} in the frame, outside the intended band`);
+          // A lone die leaves plenty of room, so the requested placement should be
+          // met almost exactly.
+          if (Math.abs(ndc.y - wanted) > 0.08) {
+            failures.push(`${label}: die sits at y ${ndc.y.toFixed(2)}, asked for ${wanted}`);
           }
           if (ndc.z > 1) {
             failures.push(`${label}: die is behind the far plane`);
           }
 
-          lines.push(`${label.padEnd(34)} frame position ${ndc.x.toFixed(2)}, ${ndc.y.toFixed(2)}`);
+          lines.push(`${label.padEnd(34)} frame position ${ndc.x.toFixed(2)}, ${ndc.y.toFixed(2)} (asked ${wanted})`);
         }
       }
 
@@ -87,7 +94,7 @@
         for (const [spreadName, radius] of spreads) {
           const centre = new THREE.Vector3(0, TRAY.floorY + 0.5, 0);
           const sphere = new THREE.Sphere(centre.clone(), radius);
-          const camera = settleCamera(aspect, sphere);
+          const camera = settleCamera(aspect, sphere, PLACEMENT[viewName]);
           camera.updateMatrixWorld(true);
 
           // Project the extremes of the bounding sphere along the camera's own
@@ -117,8 +124,8 @@
         const one = new THREE.Sphere(new THREE.Vector3(0, TRAY.floorY + DIE_RADIUS, 0), DIE_RADIUS);
         const many = new THREE.Sphere(new THREE.Vector3(0, TRAY.floorY + DIE_RADIUS, 0), 6.5);
 
-        const close = settleCamera(aspect, one).position.distanceTo(one.center);
-        const wide = settleCamera(aspect, many).position.distanceTo(many.center);
+        const close = settleCamera(aspect, one, PLACEMENT[viewName]).position.distanceTo(one.center);
+        const wide = settleCamera(aspect, many, PLACEMENT[viewName]).position.distanceTo(many.center);
 
         lines.push(`${viewName.padEnd(34)} one die ${close.toFixed(1)} units out, spread pool ${wide.toFixed(1)}`);
         if (close >= wide) {

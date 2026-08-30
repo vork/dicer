@@ -11,13 +11,14 @@
     "verify": "npm run verify:values && npm run verify:reading && npm run verify:camera && npm run verify:physics",
     "verify:values": "node tools/verify-values.mjs",
     "verify:reading": "node tools/verify-runtime.mjs",
-    "verify:physics": "node tools/verify-physics.mjs --trials 150",
+    "verify:physics": "node tools/verify-physics.mjs --trials 240",
     "calibrate": "node tools/calibrate.mjs --set set7 --mode face --zoom 0.62",
     "face-sheets": "node tools/face-sheets.mjs",
     "shoot": "node tools/shoot.mjs",
     "diagnose": "node tools/diagnose.mjs",
     "verify:build": "node tools/verify-build.mjs",
-    "verify:camera": "node tools/verify-camera.mjs"
+    "verify:camera": "node tools/verify-camera.mjs",
+    "verify:layout": "node tools/verify-layout.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.20.0",

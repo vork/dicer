@@ -90,6 +90,11 @@ try {
   await shot('midroll');
 
   await page.waitForFunction('window.dicer.debug.state().settled === true', { timeout: 180000 });
+  // Headless frames are slow enough that the 2.4s close-up expires back to the
+  // idle framing before a screenshot lands, which made these stills a picture of
+  // the wrong camera. Hold it open, and give the dolly time to arrive.
+  await page.evaluate(() => window.dicer.debug.holdReveal(true));
+  await frames(70);
   // Grab it promptly: the result flash is a 2.6s CSS animation, and headless
   // frames are slow enough that waiting long would miss it entirely.
   const flash = await page.evaluate(() => ({
@@ -119,6 +124,7 @@ try {
   await frames(6);
   await shot('settled');
 
+  await page.evaluate(() => window.dicer.debug.holdReveal(false));
   const state = await page.evaluate(() => window.dicer.debug.state());
   console.log('values:', JSON.stringify(state.values));
 } catch (error) {

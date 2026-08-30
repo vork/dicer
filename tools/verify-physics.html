@@ -102,13 +102,23 @@
         report.push(
           `${type.padEnd(4)} settled ${trials - unsettled}/${trials}  escapes ${escapes}  perched ${perched}  ` +
             `avg ${(totalSeconds / trials).toFixed(2)}s  max ${slowest.toFixed(2)}s  ` +
-            `faces seen ${observed.length}/${sides}  chi2 ${chi.toFixed(1)} (df ${sides - 1})`,
+            `faces seen ${observed.length}/${sides}${expectedCount >= 10 ? '' : '*'}  ` +
+            `chi2 ${chi.toFixed(1)} (df ${sides - 1})`,
         );
 
         if (unsettled) problems.push(`${type}: ${unsettled}/${trials} rolls never settled`);
         if (escapes) problems.push(`${type}: ${escapes}/${trials} rolls ended outside the tray`);
         if (perched) problems.push(`${type}: ${perched}/${trials} rolls did not end flat on the floor`);
-        if (observed.length !== sides) problems.push(`${type}: only ${observed.length} of ${sides} faces ever came up`);
+
+        // "Every face came up" is only a fair thing to demand once each face is
+        // expected often enough that missing one would be surprising. The chance
+        // a given face is skipped is ((s-1)/s)^trials, which for a d20 at 120
+        // rolls is still 1 in 24 across the twenty faces — asserting it there
+        // would fail on a perfectly fair die. Ten expected hits per face puts
+        // that under a tenth of a percent.
+        if (expectedCount >= 10 && observed.length !== sides) {
+          problems.push(`${type}: only ${observed.length} of ${sides} faces ever came up`);
+        }
       }
 
       // --- a full pool at the UI's cap, the heaviest case for contacts, and
@@ -131,6 +141,10 @@
       );
       if (poolUnsettled) problems.push(`mixed pool: ${poolUnsettled}/${poolTrials} rolls never settled`);
       if (poolEscapes) problems.push(`mixed pool: ${poolEscapes}/${poolTrials} rolls ended outside the tray`);
+      }
+
+      if (report.some((line) => line.includes('*'))) {
+        report.push('* too few rolls per face to demand full coverage; chi-square still applies');
       }
 
       document.getElementById('out').textContent = report.join('\n');

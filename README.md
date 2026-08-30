@@ -52,9 +52,11 @@ which face, so that mapping had to be recovered.
    - Every slot must read back as itself from every yaw, through the same
      `src/dice/read.ts` the app uses, alongside a table of cases for how a pool
      collapses under sum, highest and lowest.
-   - 150 simulated rolls per die type must all settle inside the tray, land flat on
-     the floor, and cover every face, plus a full twelve-die pool to stress
-     contacts.
+   - 240 simulated rolls per die type must all settle inside the tray, land flat
+     on the floor, and cover every face, plus a full twelve-die pool to stress
+     contacts. The coverage check only applies once each face is expected ten
+     times or more: below that a fair d20 skips a face often enough to fail on
+     luck alone.
 
 ## Layout
 
@@ -110,6 +112,15 @@ A die that comes to rest leaning on a wall or on a neighbour is detected (its
 upward face is more than a few degrees off vertical) and nudged until it lies flat,
 so a reading is never taken off a cocked die.
 
+Where the close-up puts the dice is measured, not assumed. The app reads the gap
+between the bottom of the flashed total and the top of the controls and asks the
+camera to land the dice in the middle of it. That gap is a very different shape on
+a phone — where the controls stack into several rows — than on a desktop, and a
+fixed camera offset parked the dice behind them. The camera honours the request
+only as far as the framing allows: tilting to place the subject costs vertical
+frame, so a pool spread across the tray gets almost none and stays centred rather
+than being cropped.
+
 Every throw randomises the starting orientation with Shoemake's method, which is
 uniform over the space of rotations — random Euler angles would have clustered
 around the poles. Spawn position, heading, speed, lift and spin on all three axes
@@ -128,6 +139,7 @@ where a fair die belongs.
 | `npm run verify:values` | opposite-face-sum invariant on the tables |
 | `npm run verify:reading` | every slot reads back from every yaw, and pool resolution |
 | `npm run verify:camera` | the reveal frames dice anywhere in the tray, uncropped |
+| `npm run verify:layout` | settled dice land clear of the result and the controls |
 | `npm run verify:physics` | settle, containment and distribution over many rolls |
 | `npm run verify:build` | the built site runs from a sub-path, with no 404s |
 | `npm run calibrate` | regenerate the face contact sheets |

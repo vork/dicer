@@ -45,6 +45,8 @@ export class App {
   private setRequest = 0;
   private revealTimer = 0;
   private revealing = false;
+  /** Test hook: holds the close-up open so a headless run can measure it. */
+  private revealHeld = false;
   /** Which dice the reveal closes in on; empty means all of them. */
   private revealFocus: number[] = [];
   private running = false;
@@ -207,7 +209,7 @@ export class App {
 
     if (justSettled) this.onSettled();
 
-    if (this.revealing) {
+    if (this.revealing && !this.revealHeld) {
       this.revealTimer += delta;
       if (this.revealTimer > REVEAL_HOLD_SECONDS) {
         this.revealing = false;
@@ -228,6 +230,9 @@ export class App {
     const rolls = this.diceWorld.values();
     const outcome = resolveRoll(rolls, this.resultMode);
     this.hud.showResult(rolls, outcome);
+    // The clear strip between the flashed total and the controls is a different
+    // shape on every viewport, so let the layout decide where the dice sit.
+    this.director.setSubjectPlacement(this.hud.getSubjectPlacement());
     this.audio.reveal(outcome.critical);
 
     this.revealFocus = outcome.keptIndices;
@@ -253,6 +258,16 @@ export class App {
       setMode: (mode: ResultMode) => {
         this.resultMode = mode;
       },
+      holdReveal: (hold: boolean) => {
+        this.revealHeld = hold;
+      },
+      diceScreenInfo: () => ({
+        camera: this.director.camera,
+        positions: this.diceWorld.dice.map((die) => {
+          const t = die.body.translation();
+          return { x: t.x, y: t.y, z: t.z, radius: this.assets.info[die.type].radius };
+        }),
+      }),
       state: () => ({
         rolling: this.diceWorld.isRolling,
         settled: this.diceWorld.allSettled,
@@ -269,6 +284,7 @@ export class App {
     this.renderer.setPixelRatio(pixelRatio);
     this.renderer.setSize(width, height, false);
     this.director.setAspect(width / height);
+    this.director.setSubjectPlacement(this.hud.getSubjectPlacement());
     this.postFx.setSize(width, height, pixelRatio);
   };
 

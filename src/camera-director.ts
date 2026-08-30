@@ -9,12 +9,11 @@ interface Pose {
   pitch: number;
   fov: number;
   /**
-   * How far to tilt the camera up after aiming, pushing the subject down the
-   * frame so the flashed total has the top of the screen. This is the most the
-   * pose ever asks for; how much is actually applied depends on the room left
-   * over once the subject has been fitted.
+   * Whether this pose aims the subject at a requested place in the frame rather
+   * than dead centre. Only the reveal does, so the flashed total can have the
+   * space above and the controls the space below.
    */
-  compose: number;
+  placeSubject: boolean;
   /** Exponential smoothing rate; higher snaps faster. */
   followRate: number;
   orbitRate: number;
@@ -23,12 +22,12 @@ interface Pose {
 
 const POSES: Record<CameraMode, Pose> = {
   // Wide and high: the whole tray, held still enough to read the controls.
-  idle: { frameRadius: 7.7, pitch: 0.8, fov: 36, compose: 0, followRate: 1.8, orbitRate: 1.2, dollyRate: 1.6 },
+  idle: { frameRadius: 7.7, pitch: 0.8, fov: 36, placeSubject: false, followRate: 1.8, orbitRate: 1.2, dollyRate: 1.6 },
   // Lower and looser, chasing the cluster while it scatters.
-  rolling: { frameRadius: 6.2, pitch: 0.6, fov: 42, compose: 0, followRate: 5.2, orbitRate: 1.6, dollyRate: 2.6 },
+  rolling: { frameRadius: 6.2, pitch: 0.6, fov: 42, placeSubject: false, followRate: 5.2, orbitRate: 1.6, dollyRate: 2.6 },
   // Long lens, close in, and high enough to read the faces that landed up —
   // a low reveal angle sees the printed numbers edge-on and defeats the point.
-  reveal: { frameRadius: 2.4, pitch: 1.02, fov: 28, compose: 0.13, followRate: 3.0, orbitRate: 0.7, dollyRate: 1.5 },
+  reveal: { frameRadius: 2.4, pitch: 1.02, fov: 28, placeSubject: true, followRate: 3.0, orbitRate: 0.7, dollyRate: 1.5 },
 };
 
 /**
@@ -53,7 +52,14 @@ export class CameraDirector {
   private yaw = 0;
   private pitch = POSES.idle.pitch;
   private fov = POSES.idle.fov;
-  private compose = POSES.idle.compose;
+  private compose = 0;
+  /**
+   * Where the reveal should sit vertically, in normalised device coordinates:
+   * +1 is the top of the screen, -1 the bottom. The app measures the gap between
+   * the flashed total and the controls and sets this, because that gap is a very
+   * different shape on a phone than on a desktop.
+   */
+  private placement = -0.35;
   private time = 0;
   /** Grows while a reveal is held, for the slow continued push. */
   private revealTime = 0;
@@ -95,12 +101,20 @@ export class CameraDirector {
    * the bottom edge, which is exactly what it used to do.
    */
   private affordableCompose(wanted: number, subjectRadius: number, distance: number, fov: number): number {
-    if (wanted <= 0 || subjectRadius <= 0 || distance <= subjectRadius) return 0;
+    if (wanted === 0 || subjectRadius <= 0 || distance <= subjectRadius) return 0;
     const verticalHalf = THREE.MathUtils.degToRad(fov) / 2;
     const subjectHalf = Math.asin(Math.min(1, subjectRadius / distance));
     // A little slack so a die's shadow and highlight do not graze the edge.
-    const room = verticalHalf - subjectHalf - 0.02;
-    return THREE.MathUtils.clamp(wanted, 0, Math.max(0, room));
+    const room = Math.max(0, verticalHalf - subjectHalf - 0.02);
+    return THREE.MathUtils.clamp(wanted, -room, room);
+  }
+
+  /**
+   * Asks for the subject to sit at `ndcY` vertically, where +1 is the top of the
+   * screen and -1 the bottom. Honoured only as far as the framing allows.
+   */
+  setSubjectPlacement(ndcY: number) {
+    this.placement = THREE.MathUtils.clamp(ndcY, -0.9, 0.9);
   }
 
   update(dt: number, bounds: THREE.Sphere) {
@@ -122,10 +136,13 @@ export class CameraDirector {
     let radius = pose.frameRadius;
     if (this.mode === 'rolling') radius = Math.max(pose.frameRadius, bounds.radius * 1.55);
     if (this.mode === 'reveal') {
+      // A tall viewport is bound by its width, so the same framing radius leaves a
+      // lone die small in a lot of empty height. Close in as the frame narrows.
+      const closest = pose.frameRadius * THREE.MathUtils.clamp(0.45 + 0.55 * this.camera.aspect, 0.62, 1);
       // Whatever the caller framed has to fit — under sum that is every die, under
       // highest/lowest only the dice that won. The cap is the widest the tray can
       // ever demand, so it trims surplus margin and never crops a die.
-      radius = THREE.MathUtils.clamp(bounds.radius * 1.15, pose.frameRadius, REVEAL_MAX_RADIUS);
+      radius = THREE.MathUtils.clamp(bounds.radius * 1.15, closest, REVEAL_MAX_RADIUS);
       this.revealTime += dt;
     }
 
@@ -141,7 +158,11 @@ export class CameraDirector {
     }
 
     this.desiredDistance = this.fitDistance(radius, fov);
-    const compose = this.affordableCompose(pose.compose, bounds.radius, this.desiredDistance, fov);
+    // Tilting up by an angle moves the subject down the frame by that same angle,
+    // so the tilt that lands it at `placement` is that offset scaled by the
+    // frame's vertical half-angle.
+    const wanted = pose.placeSubject ? -this.placement * (THREE.MathUtils.degToRad(fov) / 2) : 0;
+    const compose = this.affordableCompose(wanted, bounds.radius, this.desiredDistance, fov);
 
     // Slow drift keeps the frame alive; the reveal adds a touch of orbit for parallax.
     const drift = Math.sin(this.time * 0.11) * 0.1 + Math.sin(this.time * 0.043) * 0.06;

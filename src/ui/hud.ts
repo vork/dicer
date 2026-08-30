@@ -39,6 +39,8 @@ export class Hud {
   private aimLine: SVGLineElement | null = null;
   private aimHead: SVGPolygonElement | null = null;
   private hasRolled = false;
+  /** Clear vertical band left for the dice, in CSS pixels from the top. */
+  private band = { top: 0, bottom: 0 };
 
   constructor(callbacks: HudCallbacks) {
     this.callbacks = callbacks;
@@ -292,10 +294,43 @@ export class Hud {
       });
     }
 
+    this.measureBand();
+
     // Restart the CSS animation from the top.
     this.reveal.classList.remove('show');
     void this.reveal.offsetWidth;
     this.reveal.classList.add('show');
+  }
+
+  /**
+   * The gap between the bottom of the flashed result and the top of the controls
+   * — the strip of screen where the dice can actually be seen. Measured with the
+   * reveal laid out but not yet animating, since the entry animation scales the
+   * block and would report a misleading rectangle.
+   */
+  private measureBand() {
+    const bottoms = [this.revealTotal, this.revealCaption, this.revealBreakdown]
+      .filter((element) => element.textContent)
+      .map((element) => element.getBoundingClientRect().bottom);
+
+    const top = bottoms.length ? Math.max(...bottoms) : 0;
+    const controls = this.controls.getBoundingClientRect().top;
+    // Fall back to the whole viewport if the layout has not settled yet.
+    this.band = {
+      top,
+      bottom: controls > top ? controls : window.innerHeight,
+    };
+  }
+
+  /**
+   * Where the dice should sit vertically, in normalised device coordinates, so
+   * they land in the middle of that clear band rather than behind the controls.
+   * On a phone the controls are several rows tall and the band sits much higher
+   * up the screen than it does on a desktop.
+   */
+  getSubjectPlacement(): number {
+    const centre = (this.band.top + this.band.bottom) / 2;
+    return 1 - (2 * centre) / Math.max(1, window.innerHeight);
   }
 
   setRolling(rolling: boolean) {
