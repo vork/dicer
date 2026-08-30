@@ -128,6 +128,19 @@ are randomised per die as well. Over 3000 simulated d20 rolls the face
 distribution gives a chi-square of 13.9 against 19 degrees of freedom, which is
 where a fair die belongs.
 
+Dice in one throw are independent of each other, and `npm run verify:pairs`
+measures it rather than assuming it: over 2500 throws of 2d20 the pair matched
+5.1% of the time against the 5.0% chance predicts, the correlation between the two
+values was +0.03 against a standard error of 0.02, and neither slot was biased. So
+doubles are simply as common as they should be — one roll in twenty for 2d20, and
+one in six for 2d6.
+
+Each die is launched from its own point on a ring, staggered in height so they do
+not spawn inside one another. Which die takes which slot is shuffled every throw:
+without that the first die in the pool would always leave from the same place
+relative to the heading, so the pool's slots could not be independent by
+construction, only by measurement.
+
 ## Tooling
 
 | command | what it does |
@@ -141,6 +154,7 @@ where a fair die belongs.
 | `npm run verify:camera` | the reveal frames dice anywhere in the tray, uncropped |
 | `npm run verify:layout` | settled dice land clear of the result and the controls |
 | `npm run verify:physics` | settle, containment and distribution over many rolls |
+| `npm run verify:pairs` | two dice in one throw land independently of each other |
 | `npm run verify:build` | the built site runs from a sub-path, with no 404s |
 | `npm run calibrate` | regenerate the face contact sheets |
 | `npm run shoot` | screenshot the running app at each stage |

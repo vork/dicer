@@ -243,12 +243,24 @@ export class DiceWorld {
     const originX = -heading.x * TRAY.innerWidth * 0.3;
     const originZ = -heading.y * TRAY.innerDepth * 0.3;
 
+    // Dice launch from a ring around the origin, staggered in height so they do
+    // not spawn inside one another. Both of those are fixed per position, so
+    // shuffle which die takes which slot: otherwise the first die in the pool
+    // would always be thrown from the same spot relative to the heading, and the
+    // pool's slots could not be independent by construction.
+    const slots = this.dice.map((_, i) => i);
+    for (let i = slots.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [slots[i], slots[j]] = [slots[j], slots[i]];
+    }
+
     this.dice.forEach((die, index) => {
+      const slot = slots[index];
       const jitter = 0.6;
-      const angle = (index / Math.max(1, this.dice.length)) * Math.PI * 2;
+      const angle = (slot / Math.max(1, this.dice.length)) * Math.PI * 2;
       const x = originX + Math.cos(angle) * jitter + (Math.random() - 0.5) * 0.5;
       const z = originZ + Math.sin(angle) * jitter + (Math.random() - 0.5) * 0.5;
-      const y = TRAY.floorY + 4.2 + Math.random() * 1.8 + index * 0.3;
+      const y = TRAY.floorY + 4.2 + Math.random() * 1.8 + slot * 0.3;
 
       die.body.setTranslation({ x, y, z }, true);
       die.body.setRotation(randomQuaternion(), true);

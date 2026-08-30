@@ -18,7 +18,8 @@
     "diagnose": "node tools/diagnose.mjs",
     "verify:build": "node tools/verify-build.mjs",
     "verify:camera": "node tools/verify-camera.mjs",
-    "verify:layout": "node tools/verify-layout.mjs"
+    "verify:layout": "node tools/verify-layout.mjs",
+    "verify:pairs": "node tools/verify-physics.mjs --pairs 1500"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.20.0",

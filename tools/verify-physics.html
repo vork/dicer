@@ -18,6 +18,8 @@
       const trials = Number(params.get('trials') || 200);
       // Narrow to one die type when you want a high-count fairness run.
       const only = params.get('only');
+      // Roll a pair this many times and test the two dice for independence.
+      const pairs = Number(params.get('pairs') || 0);
       const timeoutSeconds = 25;
       const dt = 1 / 60;
 
@@ -68,8 +70,90 @@
         return { settled, escaped, perched, seconds: elapsed, values: world.values().map((v) => v.value) };
       }
 
+      /**
+       * Do two dice of the same type in one throw land independently?
+       *
+       * They are launched from a ring around a shared origin, with a shared base
+       * speed and one spawned slightly higher than the other, so a correlation is
+       * not unthinkable even though each gets its own uniform random orientation.
+       * Three things are checked: how often the pair matches (1/sides if they are
+       * independent), the linear correlation between the two values, and whether
+       * either slot in the pair is biased on its own.
+       */
+      function testPairs(type, count) {
+        const sides = DIE_SIDES[type];
+        const first = new Map();
+        const second = new Map();
+        let matches = 0;
+        let sumA = 0;
+        let sumB = 0;
+        let sumAB = 0;
+        let sumAA = 0;
+        let sumBB = 0;
+
+        for (let i = 0; i < count; i++) {
+          const { values } = runTrial([type, type]);
+          const [a, b] = values;
+          if (a === b) matches++;
+          first.set(a, (first.get(a) ?? 0) + 1);
+          second.set(b, (second.get(b) ?? 0) + 1);
+          sumA += a; sumB += b; sumAB += a * b; sumAA += a * a; sumBB += b * b;
+        }
+
+        const chiOf = (counts) => {
+          const expected = count / sides;
+          let chi = 0;
+          for (let v = 1; v <= sides; v++) chi += ((counts.get(v) ?? 0) - expected) ** 2 / expected;
+          return chi;
+        };
+
+        const meanA = sumA / count;
+        const meanB = sumB / count;
+        const covariance = sumAB / count - meanA * meanB;
+        const sdA = Math.sqrt(sumAA / count - meanA * meanA);
+        const sdB = Math.sqrt(sumBB / count - meanB * meanB);
+        const r = covariance / (sdA * sdB);
+
+        // How far the match rate sits from chance, in standard errors.
+        const p = 1 / sides;
+        const rate = matches / count;
+        const z = (rate - p) / Math.sqrt((p * (1 - p)) / count);
+        // Standard error of a correlation that is really zero.
+        const rError = 1 / Math.sqrt(count);
+        // Standard error of the gap between the two slots' means.
+        const meanError = Math.sqrt((sdA * sdA + sdB * sdB) / count);
+
+        report.push(
+          `2${type} x${count}: matched ${(rate * 100).toFixed(1)}% vs ${(p * 100).toFixed(1)}% expected (z ${z.toFixed(1)})  ` +
+            `r ${r >= 0 ? '+' : ''}${r.toFixed(3)} (se ${rError.toFixed(3)})`,
+        );
+        report.push(
+          `            slot A chi2 ${chiOf(first).toFixed(1)} mean ${meanA.toFixed(2)}  ` +
+            `slot B chi2 ${chiOf(second).toFixed(1)} mean ${meanB.toFixed(2)}  ` +
+            `gap ${(meanA - meanB).toFixed(2)} (se ${meanError.toFixed(2)})`,
+        );
+
+        // Four standard errors: a fair pair trips these about once in 16000 runs.
+        if (Math.abs(z) > 4) problems.push(`2${type}: pairs match ${(rate * 100).toFixed(1)}% of the time, chance is ${(p * 100).toFixed(1)}% (z ${z.toFixed(1)})`);
+        if (Math.abs(r) > 4 * rError) problems.push(`2${type}: the two values correlate, r ${r.toFixed(3)} against a standard error of ${rError.toFixed(3)}`);
+        if (Math.abs(meanA - meanB) > 4 * meanError) problems.push(`2${type}: one slot in the pair averages higher, gap ${(meanA - meanB).toFixed(2)} against a standard error of ${meanError.toFixed(2)}`);
+        for (const [slot, counts] of [['A', first], ['B', second]]) {
+          const chi = chiOf(counts);
+          // df = sides - 1; this threshold is about p = 1e-4.
+          const limit = sides - 1 + 5 * Math.sqrt(2 * (sides - 1));
+          if (chi > limit) problems.push(`2${type}: slot ${slot} is not uniform, chi2 ${chi.toFixed(1)} against a limit of ${limit.toFixed(1)}`);
+        }
+      }
+
+      if (pairs) {
+        for (const type of only ? [only] : ['d20', 'd6']) testPairs(type, pairs);
+        document.getElementById('out').textContent = report.join('\n');
+        window.__result = { report, problems };
+        window.__done = true;
+      }
+
       // --- single die of each type: settle reliability and value distribution ---
-      for (const type of DIE_TYPES) {
+      for (const type of pairs ? [] : DIE_TYPES) {
         if (only && type !== only) continue;
         const counts = new Map();
         let totalSeconds = 0;
@@ -123,7 +207,7 @@
 
       // --- a full pool at the UI's cap, the heaviest case for contacts, and
       // deliberately duplicate-heavy since that is how people build a pool ---
-      if (!only) {
+      if (!only && !pairs) {
       const pool = ['d6', 'd6', 'd6', 'd6', 'd20', 'd20', 'd4', 'd8', 'd8', 'd10', 'd12', 'd12'];
       let poolUnsettled = 0;
       let poolEscapes = 0;
