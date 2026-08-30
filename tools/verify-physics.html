@@ -12,6 +12,7 @@
       import { loadDiceAssets } from '/src/assets.ts';
       import { DiceWorld } from '/src/physics/dice-world.ts';
       import { DIE_SIDES, DIE_TYPES } from '/src/dice/values.ts';
+      import { readDie, readDirectionsFor } from '/src/dice/read.ts';
       import { TRAY } from '/src/scene/tray.ts';
 
       const params = new URLSearchParams(location.search);
@@ -22,6 +23,9 @@
       const pairs = Number(params.get('pairs') || 0);
       // Limit the pair run to one of the two paths.
       const pairPath = params.get('path');
+      // Throw at one fixed strength instead of a random one, the way a player
+      // repeating much the same drag does.
+      const fixedPower = params.get('power') === null ? null : Number(params.get('power'));
       const timeoutSeconds = 25;
       const dt = 1 / 60;
 
@@ -31,11 +35,12 @@
 
       const report = [];
       const problems = [];
+      const perchDetail = [];
 
       function runTrial(pool) {
         world.setPool(pool);
         const angle = Math.random() * Math.PI * 2;
-        world.roll(new THREE.Vector2(Math.cos(angle), Math.sin(angle)), Math.random());
+        world.roll(new THREE.Vector2(Math.cos(angle), Math.sin(angle)), fixedPower ?? Math.random());
 
         let elapsed = 0;
         while (elapsed < timeoutSeconds) {
@@ -60,12 +65,28 @@
         }
 
         // A die resting flat sits exactly its inradius above the floor. Anything
-        // higher is perched on a neighbour or stuck on the wall.
+        // higher is perched on a neighbour or stuck on the wall. When that happens,
+        // record how squarely the reading slot still points up: a die that is
+        // visibly askew but still reads dead-on is a cosmetic problem, one that
+        // reads off-axis is a wrong number.
         let perched = false;
         if (pool.length === 1) {
           for (const die of world.dice) {
             const expected = TRAY.floorY + assets.info[die.type].inradius;
-            if (Math.abs(die.body.translation().y - expected) > 0.12) perched = true;
+            const actual = die.body.translation().y;
+            if (Math.abs(actual - expected) > 0.12) {
+              perched = true;
+              const r = die.body.rotation();
+              const reading = readDie(
+                die.type,
+                readDirectionsFor(die.type, assets.info[die.type]),
+                new THREE.Quaternion(r.x, r.y, r.z, r.w),
+              );
+              perchDetail.push(
+                `${die.type} rested at y ${actual.toFixed(3)} (flat is ${expected.toFixed(3)}), ` +
+                  `reading slot ${reading.index} value ${reading.value} at dot ${reading.dot.toFixed(4)}`,
+              );
+            }
           }
         }
 
@@ -75,7 +96,7 @@
       /** Throws the pool that already exists, without rebuilding the bodies. */
       function rollExisting() {
         const angle = Math.random() * Math.PI * 2;
-        world.roll(new THREE.Vector2(Math.cos(angle), Math.sin(angle)), Math.random());
+        world.roll(new THREE.Vector2(Math.cos(angle), Math.sin(angle)), fixedPower ?? Math.random());
         let elapsed = 0;
         while (elapsed < timeoutSeconds) {
           const { justSettled } = world.step(dt);
@@ -181,7 +202,7 @@
         const jointDf = (sides - 1) * (sides - 1);
 
         report.push(
-          `2${type} ${reuse ? '(same bodies)' : '(rebuilt) '} x${count}: matched ${(rate * 100).toFixed(1)}% vs ${(p * 100).toFixed(1)}% expected (z ${z.toFixed(1)})  ` +
+          `2${type} ${reuse ? '(same bodies)' : '(rebuilt) '}${fixedPower === null ? '' : ` p${fixedPower}`} x${count}: matched ${(rate * 100).toFixed(1)}% vs ${(p * 100).toFixed(1)}% expected (z ${z.toFixed(1)})  ` +
             `r ${r >= 0 ? '+' : ''}${r.toFixed(3)} (se ${rError.toFixed(3)})`,
         );
         report.push(
@@ -314,6 +335,8 @@
       if (report.some((line) => line.includes('*'))) {
         report.push('* too few rolls per face to demand full coverage; chi-square still applies');
       }
+
+      if (perchDetail.length) report.push('', 'dice that did not rest flat:', ...perchDetail.map((d) => `  ${d}`));
 
       document.getElementById('out').textContent = report.join('\n');
       window.__result = { report, problems };

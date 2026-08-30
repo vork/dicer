@@ -28,9 +28,21 @@ export class DiceAudio {
     const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
     if (!Ctor) return;
     const context = new Ctor();
+
+    // Dice make a lot of small taps and a few hard cracks. Pushing the quiet end
+    // up far enough to hear leaves the loud end clipping when several land at
+    // once, so the bus runs through a limiter and the levels can sit high.
+    const limiter = context.createDynamicsCompressor();
+    limiter.threshold.value = -12;
+    limiter.knee.value = 8;
+    limiter.ratio.value = 8;
+    limiter.attack.value = 0.003;
+    limiter.release.value = 0.15;
+    limiter.connect(context.destination);
+
     const master = context.createGain();
     master.gain.value = this.enabled ? 0.9 : 0;
-    master.connect(context.destination);
+    master.connect(limiter);
 
     // Two seconds of white noise, reused for every click.
     const buffer = context.createBuffer(1, context.sampleRate * 2, context.sampleRate);
@@ -61,7 +73,10 @@ export class DiceAudio {
     this.lastPlayed = now;
     this.playedInWindow++;
 
-    const level = Math.max(0.06, Math.min(1, strength));
+    // Most contacts in a roll are gentle settling taps rather than the opening
+    // crack, so a linear mapping left the median impact near inaudible. The
+    // curve lifts the quiet end without flattening the loud end.
+    const level = Math.pow(Math.max(0.06, Math.min(1, strength)), 0.55);
 
     // Click: band-passed noise, brighter and longer the harder the hit.
     const source = context.createBufferSource();
@@ -74,7 +89,7 @@ export class DiceAudio {
     const clickGain = context.createGain();
     const clickDuration = 0.035 + level * 0.05;
     clickGain.gain.setValueAtTime(0, now);
-    clickGain.gain.linearRampToValueAtTime(0.42 * level, now + 0.003);
+    clickGain.gain.linearRampToValueAtTime(0.8 * level, now + 0.003);
     clickGain.gain.exponentialRampToValueAtTime(0.0001, now + clickDuration);
     const placement = context.createStereoPanner();
     placement.pan.value = Math.max(-1, Math.min(1, pan)) * 0.6;
@@ -82,14 +97,14 @@ export class DiceAudio {
     source.start(now, Math.random() * 1.5, clickDuration + 0.02);
 
     // Body: a short low sine, only on hits with real force behind them.
-    if (level > 0.22) {
+    if (level > 0.3) {
       const thump = context.createOscillator();
       thump.type = 'sine';
       thump.frequency.setValueAtTime(150 + Math.random() * 40, now);
       thump.frequency.exponentialRampToValueAtTime(58, now + 0.1);
       const thumpGain = context.createGain();
       thumpGain.gain.setValueAtTime(0, now);
-      thumpGain.gain.linearRampToValueAtTime(0.3 * level, now + 0.006);
+      thumpGain.gain.linearRampToValueAtTime(0.55 * level, now + 0.006);
       thumpGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.13);
       thump.connect(thumpGain).connect(master);
       thump.start(now);
@@ -113,7 +128,7 @@ export class DiceAudio {
       const gain = context.createGain();
       const start = now + index * 0.035;
       gain.gain.setValueAtTime(0, start);
-      gain.gain.linearRampToValueAtTime(0.09 / (index + 1), start + 0.02);
+      gain.gain.linearRampToValueAtTime(0.17 / (index + 1), start + 0.02);
       gain.gain.exponentialRampToValueAtTime(0.0001, start + 1.1);
       osc.connect(gain).connect(master);
       osc.start(start);

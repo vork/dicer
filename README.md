@@ -108,18 +108,30 @@ real second, which stretches the timeline without touching the dynamics — the
 trajectories are the ones true gravity produces, just watched a little slower.
 Scaling gravity down instead would have made the dice look light.
 
-A die that comes to rest leaning on a wall or on a neighbour is detected (its
-upward face is more than a few degrees off vertical) and nudged until it lies flat,
-so a reading is never taken off a cocked die.
+A die that comes to rest leaning on a wall or on a neighbour is detected — its
+upward face is more than a few degrees off vertical — and settled before it is
+read. A kick in place frees a die propped on a neighbour, but not one wedged into
+a corner, where the wall being pushed against is the wall it rebounds off. So
+after two attempts the die is picked up and dropped again near the middle of the
+tray, which is what a player does with a cocked die and, given a fresh uniform
+orientation, is a fair re-roll. Before that, four kicks and then acceptance meant
+a wedged d4 could be read at 44 degrees off vertical — a wrong number about once
+in fifteen hundred rolls, which `verify:physics` now catches by checking that a
+settled die rests at exactly its inradius above the floor.
 
 Where the close-up puts the dice is measured, not assumed. The app reads the gap
-between the bottom of the flashed total and the top of the controls and asks the
-camera to land the dice in the middle of it. That gap is a very different shape on
-a phone — where the controls stack into several rows — than on a desktop, and a
-fixed camera offset parked the dice behind them. The camera honours the request
-only as far as the framing allows: tilting to place the subject costs vertical
-frame, so a pool spread across the tray gets almost none and stays centred rather
-than being cropped.
+between the bottom of the flashed total and the top of the controls and hands the
+camera that band; the camera frames the dice to fit inside it. That gap is a very
+different shape on a phone — where the controls stack into several rows — than on
+a desktop, and a fixed camera offset parked the dice behind them.
+
+Fitting the band rather than the whole frame is what makes the placement possible
+at all: a subject framed to fill the screen has nowhere left to move, so asking
+for it to sit clear of the controls achieves nothing. The pull-back that buys the
+room is capped, because dice in opposite corners of a shallow window would
+otherwise retreat to several times the tray's width and become specks. Past that
+cap the subject cannot fit, and the overflow goes upward on purpose: a die reaching
+behind the flashed total is still visible, while one under the controls is gone.
 
 Every throw randomises the starting orientation with Shoemake's method, which is
 uniform over the space of rotations — random Euler angles would have clustered
@@ -164,6 +176,7 @@ construction, only by measurement.
 | `npm run verify:layout` | settled dice land clear of the result and the controls |
 | `npm run verify:physics` | settle, containment and distribution over many rolls |
 | `npm run verify:pairs` | two dice in one throw land independently of each other |
+| `npm run verify:audio` | impacts make sound, and the toggle silences and restores it |
 | `npm run verify:build` | the built site runs from a sub-path, with no 404s |
 | `npm run calibrate` | regenerate the face contact sheets |
 | `npm run shoot` | screenshot the running app at each stage |

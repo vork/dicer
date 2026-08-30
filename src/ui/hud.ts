@@ -54,6 +54,7 @@ export class Hud {
     this.soundButton.addEventListener('click', () => {
       const enabled = this.soundButton.getAttribute('aria-pressed') !== 'true';
       this.soundButton.setAttribute('aria-pressed', String(enabled));
+      this.soundButton.title = enabled ? 'Sound on' : 'Sound off';
       this.callbacks.onSoundToggle(enabled);
     });
   }
@@ -323,14 +324,16 @@ export class Hud {
   }
 
   /**
-   * Where the dice should sit vertically, in normalised device coordinates, so
-   * they land in the middle of that clear band rather than behind the controls.
+   * The clear band in normalised device coordinates, for the camera to aim into.
    * On a phone the controls are several rows tall and the band sits much higher
    * up the screen than it does on a desktop.
    */
-  getSubjectPlacement(): number {
-    const centre = (this.band.top + this.band.bottom) / 2;
-    return 1 - (2 * centre) / Math.max(1, window.innerHeight);
+  getSubjectBand(): { top: number; bottom: number } {
+    const height = Math.max(1, window.innerHeight);
+    return {
+      top: 1 - (2 * this.band.top) / height,
+      bottom: 1 - (2 * this.band.bottom) / height,
+    };
   }
 
   setRolling(rolling: boolean) {

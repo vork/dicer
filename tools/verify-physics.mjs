@@ -17,6 +17,7 @@ const trials = args.trials || '200';
 const only = args.only ? `&only=${args.only}` : '';
 const pairs = args.pairs ? `&pairs=${args.pairs}` : '';
 const path = args.path ? `&path=${args.path}` : '';
+const power = args.power ? `&power=${args.power}` : '';
 
 const server = await createServer({
   root: process.cwd(),
@@ -35,7 +36,7 @@ page.on('console', (m) => { if (m.type() === 'error') console.error('[page]', m.
 
 let failed = false;
 try {
-  await page.goto(`http://127.0.0.1:5197/tools/verify-physics.html?trials=${trials}${only}${pairs}${path}`, {
+  await page.goto(`http://127.0.0.1:5197/tools/verify-physics.html?trials=${trials}${only}${pairs}${path}${power}`, {
     // The page's module script runs every trial synchronously, so 'load' does not
     // fire until the whole run is over — waiting for it would time out.
     waitUntil: 'commit',

@@ -37,6 +37,9 @@ const POSES: Record<CameraMode, Pose> = {
  */
 const REVEAL_MAX_RADIUS = Math.hypot(TRAY.innerWidth, TRAY.innerDepth) / 2 + 0.7;
 
+/** How much further than a frame-filling shot the band may pull the camera back. */
+const BAND_FIT_LIMIT = 1.4;
+
 /** Frame-rate independent exponential smoothing. */
 const damp = (current: number, target: number, rate: number, dt: number) =>
   THREE.MathUtils.lerp(current, target, 1 - Math.exp(-rate * dt));
@@ -54,12 +57,13 @@ export class CameraDirector {
   private fov = POSES.idle.fov;
   private compose = 0;
   /**
-   * Where the reveal should sit vertically, in normalised device coordinates:
-   * +1 is the top of the screen, -1 the bottom. The app measures the gap between
-   * the flashed total and the controls and sets this, because that gap is a very
-   * different shape on a phone than on a desktop.
+   * The strip of screen the reveal should land in, in normalised device
+   * coordinates: +1 is the top, -1 the bottom. The app measures the gap between
+   * the flashed total and the controls, because that gap is a very different
+   * shape on a phone than on a desktop.
    */
-  private placement = -0.35;
+  private bandTop = 0.3;
+  private bandBottom = -0.7;
   private time = 0;
   /** Grows while a reveal is held, for the slow continued push. */
   private revealTime = 0;
@@ -92,6 +96,22 @@ export class CameraDirector {
   }
 
   /**
+   * Distance at which the subject fits inside the clear band rather than the whole
+   * frame.
+   *
+   * Framing something to fill the frame leaves nowhere to move it, so asking for
+   * it to sit clear of the controls achieves nothing — the tilt gets clamped back
+   * to almost zero to avoid cropping. Fitting the band instead buys the room, at
+   * the cost of a wider shot; on a short window that is the trade, because the
+   * alternative is a die nobody can see.
+   */
+  private fitBandDistance(radius: number, fov: number): number {
+    const verticalHalf = THREE.MathUtils.degToRad(fov) / 2;
+    const bandHalf = (this.bandTop - this.bandBottom) / 2;
+    return radius / Math.sin(Math.max(verticalHalf * bandHalf, 0.02));
+  }
+
+  /**
    * The largest upward tilt that still keeps the subject fully in shot.
    *
    * Tilting moves the subject down by that angle, so the room available is the
@@ -110,11 +130,33 @@ export class CameraDirector {
   }
 
   /**
-   * Asks for the subject to sit at `ndcY` vertically, where +1 is the top of the
-   * screen and -1 the bottom. Honoured only as far as the framing allows.
+   * Asks the reveal to land between these two heights, where +1 is the top of the
+   * screen and -1 the bottom. Honoured as far as the framing allows.
    */
-  setSubjectPlacement(ndcY: number) {
-    this.placement = THREE.MathUtils.clamp(ndcY, -0.9, 0.9);
+  setSubjectBand(top: number, bottom: number) {
+    this.bandTop = THREE.MathUtils.clamp(top, -1, 1);
+    this.bandBottom = THREE.MathUtils.clamp(bottom, -1, this.bandTop);
+  }
+
+  /**
+   * Where to centre the subject vertically so it sits in the clear band.
+   *
+   * When the subject is taller than the band — a pool spread across the tray on a
+   * short window — it cannot fit, and something has to give at one end. It gives
+   * at the top: a die reaching up behind the flashed total is still visible,
+   * while one that slides under the controls is simply gone.
+   */
+  private bandedPlacement(subjectRadius: number, distance: number, fov: number): number {
+    const verticalHalf = THREE.MathUtils.degToRad(fov) / 2;
+    if (subjectRadius <= 0 || distance <= subjectRadius || verticalHalf <= 0) {
+      return (this.bandTop + this.bandBottom) / 2;
+    }
+    // The subject's own half-height, as a fraction of the frame's half-height.
+    const half = Math.asin(Math.min(1, subjectRadius / distance)) / verticalHalf;
+    const lowest = this.bandBottom + half;
+    const highest = this.bandTop - half;
+    if (lowest > highest) return lowest;
+    return THREE.MathUtils.clamp((this.bandTop + this.bandBottom) / 2, lowest, highest);
   }
 
   update(dt: number, bounds: THREE.Sphere) {
@@ -158,10 +200,21 @@ export class CameraDirector {
     }
 
     this.desiredDistance = this.fitDistance(radius, fov);
+    if (pose.placeSubject) {
+      // Capped, because dice in opposite corners inside a shallow band would
+      // otherwise pull back to several times the tray's width and turn the dice
+      // into specks. Past this point a little overlap with the result text is the
+      // better trade, and the placement below biases the overflow upward.
+      const roomiest = this.desiredDistance * BAND_FIT_LIMIT;
+      this.desiredDistance = Math.min(roomiest, Math.max(this.desiredDistance, this.fitBandDistance(bounds.radius * 1.06, fov)));
+    }
     // Tilting up by an angle moves the subject down the frame by that same angle,
-    // so the tilt that lands it at `placement` is that offset scaled by the
-    // frame's vertical half-angle.
-    const wanted = pose.placeSubject ? -this.placement * (THREE.MathUtils.degToRad(fov) / 2) : 0;
+    // so the tilt that lands it where we want is that offset scaled by the frame's
+    // vertical half-angle.
+    const placement = pose.placeSubject
+      ? this.bandedPlacement(bounds.radius, this.desiredDistance, fov)
+      : 0;
+    const wanted = -placement * (THREE.MathUtils.degToRad(fov) / 2);
     const compose = this.affordableCompose(wanted, bounds.radius, this.desiredDistance, fov);
 
     // Slow drift keeps the frame alive; the reveal adds a touch of orbit for parallax.

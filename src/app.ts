@@ -232,7 +232,8 @@ export class App {
     this.hud.showResult(rolls, outcome);
     // The clear strip between the flashed total and the controls is a different
     // shape on every viewport, so let the layout decide where the dice sit.
-    this.director.setSubjectPlacement(this.hud.getSubjectPlacement());
+    const band = this.hud.getSubjectBand();
+    this.director.setSubjectBand(band.top, band.bottom);
     this.audio.reveal(outcome.critical);
 
     this.revealFocus = outcome.keptIndices;
@@ -284,7 +285,8 @@ export class App {
     this.renderer.setPixelRatio(pixelRatio);
     this.renderer.setSize(width, height, false);
     this.director.setAspect(width / height);
-    this.director.setSubjectPlacement(this.hud.getSubjectPlacement());
+    const band = this.hud.getSubjectBand();
+    this.director.setSubjectBand(band.top, band.bottom);
     this.postFx.setSize(width, height, pixelRatio);
   };
 

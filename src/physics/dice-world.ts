@@ -37,7 +37,15 @@ const REST_SECONDS = 0.22;
 
 /** A face this far off vertical means the die is leaning on a wall or a neighbour. */
 const COCKED_DOT = 0.965;
-const MAX_UNCOCK_NUDGES = 4;
+/** After this many in-place kicks, stop nudging and re-drop the die instead. */
+const KICKS_BEFORE_REDROP = 2;
+/**
+ * Generous, because the alternative to trying again is reporting a number off a
+ * die that is not lying flat. A d4 wedged into a corner survived four kicks and
+ * was then read at 44 degrees off vertical — a wrong answer, roughly once in
+ * fifteen hundred rolls.
+ */
+const MAX_UNCOCK_NUDGES = 12;
 
 export interface Die {
   type: DieType;
@@ -377,16 +385,43 @@ export class DiceWorld {
     return readDie(die.type, die.readDirections, this.scratchQuaternion);
   }
 
-  /** Topples a die that came to rest against a wall or on top of another. */
+  /**
+   * Settles a die that came to rest against a wall or on top of another.
+   *
+   * A kick in place frees a die merely leaning on a neighbour. One wedged into a
+   * corner it does not: the wall it is propped against is also what the kick
+   * pushes it back into. So after a couple of attempts the die is picked up and
+   * dropped again near the middle of the tray — which is what a player does with
+   * a cocked die, and, given a fresh uniform orientation, is a fair re-roll.
+   */
   private nudge(die: Die) {
     die.nudges++;
     die.restSeconds = 0;
-    const kick = 3.4 + die.nudges * 1.2;
-    die.body.setLinvel({ x: (Math.random() - 0.5) * kick, y: kick, z: (Math.random() - 0.5) * kick }, true);
-    die.body.setAngvel(
-      { x: (Math.random() - 0.5) * 22, y: (Math.random() - 0.5) * 22, z: (Math.random() - 0.5) * 22 },
-      true,
-    );
+
+    if (die.nudges <= KICKS_BEFORE_REDROP) {
+      const kick = 3.4 + die.nudges * 1.2;
+      die.body.setLinvel({ x: (Math.random() - 0.5) * kick, y: kick, z: (Math.random() - 0.5) * kick }, true);
+      die.body.setAngvel(
+        { x: (Math.random() - 0.5) * 22, y: (Math.random() - 0.5) * 22, z: (Math.random() - 0.5) * 22 },
+        true,
+      );
+    } else {
+      die.body.setTranslation(
+        {
+          x: (Math.random() - 0.5) * TRAY.innerWidth * 0.35,
+          y: TRAY.floorY + 3.2,
+          z: (Math.random() - 0.5) * TRAY.innerDepth * 0.35,
+        },
+        true,
+      );
+      die.body.setRotation(randomQuaternion(), true);
+      die.body.setLinvel({ x: 0, y: -3, z: 0 }, true);
+      die.body.setAngvel(
+        { x: (Math.random() - 0.5) * 14, y: (Math.random() - 0.5) * 14, z: (Math.random() - 0.5) * 14 },
+        true,
+      );
+    }
+
     die.body.wakeUp();
   }
 

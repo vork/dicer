@@ -254,7 +254,7 @@ body {
   border: 1px solid var(--line);
   border-radius: 50%;
   background: var(--panel);
-  color: var(--ink-dim);
+  color: rgba(244, 241, 234, 0.72);
   font-size: 14px;
   cursor: pointer;
   backdrop-filter: blur(10px);
@@ -266,23 +266,45 @@ body {
   border-color: rgba(244, 241, 234, 0.3);
 }
 
+.icon-button svg {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.icon-button .speaker {
+  fill: currentColor;
+  stroke-width: 1.2;
+}
+
+/* Muted: the waves go, a slash arrives. */
+.icon-button .slash {
+  opacity: 0;
+}
+
 .icon-button[aria-pressed='false'] {
   color: var(--ink-faint);
 }
 
-.icon-button[aria-pressed='false'] span::after {
-  content: '';
-  position: absolute;
-  width: 18px;
-  height: 1px;
-  background: currentColor;
-  transform: rotate(-45deg);
+.icon-button[aria-pressed='false'] .wave {
+  opacity: 0;
 }
 
-.icon-button span {
-  position: relative;
-  display: grid;
-  place-items: center;
+.icon-button[aria-pressed='false'] .slash {
+  opacity: 1;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .hint {
