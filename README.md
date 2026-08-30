@@ -129,11 +129,20 @@ distribution gives a chi-square of 13.9 against 19 degrees of freedom, which is
 where a fair die belongs.
 
 Dice in one throw are independent of each other, and `npm run verify:pairs`
-measures it rather than assuming it: over 2500 throws of 2d20 the pair matched
-5.1% of the time against the 5.0% chance predicts, the correlation between the two
-values was +0.03 against a standard error of 0.02, and neither slot was biased. So
-doubles are simply as common as they should be — one roll in twenty for 2d20, and
-one in six for 2d6.
+measures it rather than assuming it. It checks the match rate against chance, the
+correlation between the two values, whether either slot in the pair is biased on
+its own, and a chi-square for independence over the whole joint table — which
+catches structure the match rate alone would miss.
+
+It runs two paths, because they are not the same code. Rebuilding the dice each
+throw is what a test naturally does; the app builds the pool once and then throws
+the same bodies over and over, so anything carried between throws only shows up on
+that second path. Over 6000 throws of 2d6 on the app's path the pair matched
+**16.7% against the 16.7% chance predicts**, correlation -0.000, joint chi-square
+19.0 against 25 degrees of freedom, and no roll failed to settle. 2d20 matches 5%.
+
+Doubles are simply that common: one roll in six for 2d6, one in twenty for 2d20.
+In twenty throws of 2d6 you should expect three or four matching pairs.
 
 Each die is launched from its own point on a ring, staggered in height so they do
 not spawn inside one another. Which die takes which slot is shuffled every throw:

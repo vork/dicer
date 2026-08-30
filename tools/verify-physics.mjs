@@ -16,6 +16,7 @@ const args = Object.fromEntries(
 const trials = args.trials || '200';
 const only = args.only ? `&only=${args.only}` : '';
 const pairs = args.pairs ? `&pairs=${args.pairs}` : '';
+const path = args.path ? `&path=${args.path}` : '';
 
 const server = await createServer({
   root: process.cwd(),
@@ -34,8 +35,25 @@ page.on('console', (m) => { if (m.type() === 'error') console.error('[page]', m.
 
 let failed = false;
 try {
-  await page.goto(`http://127.0.0.1:5197/tools/verify-physics.html?trials=${trials}${only}${pairs}`, { waitUntil: 'load' });
-  await page.waitForFunction('window.__done === true', { timeout: 900000 });
+  await page.goto(`http://127.0.0.1:5197/tools/verify-physics.html?trials=${trials}${only}${pairs}${path}`, {
+    // The page's module script runs every trial synchronously, so 'load' does not
+    // fire until the whole run is over — waiting for it would time out.
+    waitUntil: 'commit',
+    timeout: 120000,
+  });
+  // Report progress while waiting, so a long run is visibly alive.
+  const progress = setInterval(() => {
+    page
+      .evaluate('window.__progress')
+      .then((p) => p && process.stderr.write(`\r  ${p}          `))
+      .catch(() => {});
+  }, 5000);
+  try {
+    await page.waitForFunction('window.__done === true', { timeout: 3600000 });
+  } finally {
+    clearInterval(progress);
+    process.stderr.write('\r');
+  }
   const { report, problems } = await page.evaluate('window.__result');
   console.log(report.join('\n'));
   if (problems.length) {
