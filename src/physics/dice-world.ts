@@ -387,15 +387,23 @@ export class DiceWorld {
     }
   }
 
-  /** Bounding sphere of the current dice, for the camera to frame. */
-  getBounds(target: THREE.Sphere): THREE.Sphere {
-    if (this.dice.length === 0) {
+  /**
+   * Bounding sphere of the dice for the camera to frame. Pass `indices` to frame
+   * only some of them — the reveal uses it to close in on the dice that won.
+   */
+  getBounds(target: THREE.Sphere, indices?: readonly number[]): THREE.Sphere {
+    const framed =
+      indices && indices.length
+        ? indices.map((i) => this.dice[i]).filter((die): die is Die => die !== undefined)
+        : this.dice;
+
+    if (framed.length === 0) {
       target.center.set(0, TRAY.floorY + 0.5, 0);
       target.radius = Math.max(TRAY.innerWidth, TRAY.innerDepth) * 0.5;
       return target;
     }
     const box = this.scratchBox.makeEmpty();
-    for (const die of this.dice) {
+    for (const die of framed) {
       const t = die.body.translation();
       const radius = this.assets.info[die.type].radius;
       box.expandByPoint(this.scratchVector.set(t.x - radius, t.y - radius, t.z - radius));

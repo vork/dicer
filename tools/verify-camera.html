@@ -1,0 +1,134 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>camera framing check</title>
+  </head>
+  <body>
+    <pre id="out">running…</pre>
+    <script type="module">
+      import * as THREE from 'three';
+      import { CameraDirector } from '/src/camera-director.ts';
+      import { TRAY } from '/src/scene/tray.ts';
+
+      const lines = [];
+      const failures = [];
+
+      // A d20 is the biggest die; this is roughly its bounding radius.
+      const DIE_RADIUS = 0.52;
+      // Where a die can actually come to rest, hard against a wall.
+      const maxX = TRAY.innerWidth / 2 - DIE_RADIUS;
+      const maxZ = TRAY.innerDepth / 2 - DIE_RADIUS;
+
+      const spots = [
+        ['centre', 0, 0],
+        ['near-left corner', -maxX, maxZ],
+        ['near-right corner', maxX, maxZ],
+        ['far-left corner', -maxX, -maxZ],
+        ['far-right corner', maxX, -maxZ],
+        ['left wall', -maxX, 0],
+        ['far wall', 0, -maxZ],
+      ];
+
+      const viewports = [
+        ['landscape', 1280 / 832],
+        ['portrait', 390 / 844],
+      ];
+
+      /** Runs the director to a steady state on a fixed bounds sphere. */
+      function settleCamera(aspect, sphere, seconds = 6) {
+        const director = new CameraDirector(aspect);
+        director.setMode('reveal');
+        for (let t = 0; t < seconds * 60; t++) director.update(1 / 60, sphere);
+        return director.camera;
+      }
+
+      for (const [viewName, aspect] of viewports) {
+        for (const [spotName, x, z] of spots) {
+          const centre = new THREE.Vector3(x, TRAY.floorY + DIE_RADIUS, z);
+          const sphere = new THREE.Sphere(centre.clone(), DIE_RADIUS);
+          const camera = settleCamera(aspect, sphere);
+          camera.updateMatrixWorld(true);
+
+          // Project the die into normalised device coordinates. Anything outside
+          // [-1, 1] is off screen; the reveal deliberately parks the subject low,
+          // so the vertical window is offset rather than centred.
+          const ndc = centre.clone().project(camera);
+          const label = `${viewName} / ${spotName}`;
+
+          if (Math.abs(ndc.x) > 0.42) {
+            failures.push(`${label}: die sits at x ${ndc.x.toFixed(2)} in the frame, expected near centre`);
+          }
+          if (ndc.y > 0.25 || ndc.y < -0.85) {
+            failures.push(`${label}: die sits at y ${ndc.y.toFixed(2)} in the frame, outside the intended band`);
+          }
+          if (ndc.z > 1) {
+            failures.push(`${label}: die is behind the far plane`);
+          }
+
+          lines.push(`${label.padEnd(34)} frame position ${ndc.x.toFixed(2)}, ${ndc.y.toFixed(2)}`);
+        }
+      }
+
+      // --- nothing may be cropped, at any spread ---
+      // Tilting the camera up to make room for the flashed total costs vertical
+      // frame. For one die there is room to spare; for a pool spread across the
+      // tray there is none, and tilting regardless pushed the nearest dice off
+      // the bottom edge.
+      const spreads = [
+        ['one die', DIE_RADIUS],
+        ['a tight cluster', 1.4],
+        ['half the tray', 3.5],
+        ['a wide pool', 5.5],
+        ['corner to corner', 7.1],
+      ];
+
+      for (const [viewName, aspect] of viewports) {
+        for (const [spreadName, radius] of spreads) {
+          const centre = new THREE.Vector3(0, TRAY.floorY + 0.5, 0);
+          const sphere = new THREE.Sphere(centre.clone(), radius);
+          const camera = settleCamera(aspect, sphere);
+          camera.updateMatrixWorld(true);
+
+          // Project the extremes of the bounding sphere along the camera's own
+          // axes; every one of them has to land inside the frame.
+          const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+          const up = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+          let worstX = 0;
+          let worstY = 0;
+          for (const axis of [right, up]) {
+            for (const sign of [1, -1]) {
+              const point = centre.clone().addScaledVector(axis, radius * sign).project(camera);
+              worstX = Math.max(worstX, Math.abs(point.x));
+              worstY = Math.max(worstY, Math.abs(point.y));
+            }
+          }
+
+          const label = `${viewName} / ${spreadName}`;
+          lines.push(`${label.padEnd(34)} extremes reach ${worstX.toFixed(2)}, ${worstY.toFixed(2)}`);
+          if (worstX > 1 || worstY > 1) {
+            failures.push(`${label}: subject is cropped, extremes reach ${worstX.toFixed(2)}, ${worstY.toFixed(2)}`);
+          }
+        }
+      }
+
+      // A single die must give a genuinely closer shot than the whole tray does.
+      for (const [viewName, aspect] of viewports) {
+        const one = new THREE.Sphere(new THREE.Vector3(0, TRAY.floorY + DIE_RADIUS, 0), DIE_RADIUS);
+        const many = new THREE.Sphere(new THREE.Vector3(0, TRAY.floorY + DIE_RADIUS, 0), 6.5);
+
+        const close = settleCamera(aspect, one).position.distanceTo(one.center);
+        const wide = settleCamera(aspect, many).position.distanceTo(many.center);
+
+        lines.push(`${viewName.padEnd(34)} one die ${close.toFixed(1)} units out, spread pool ${wide.toFixed(1)}`);
+        if (close >= wide) {
+          failures.push(`${viewName}: framing one die (${close.toFixed(1)}) is no closer than a spread pool (${wide.toFixed(1)})`);
+        }
+      }
+
+      document.getElementById('out').textContent = lines.join('\n');
+      window.__result = { lines, failures };
+      window.__done = true;
+    </script>
+  </body>
+</html>

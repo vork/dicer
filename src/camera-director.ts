@@ -9,9 +9,10 @@ interface Pose {
   pitch: number;
   fov: number;
   /**
-   * Tilts the camera up after it has aimed, pushing the subject down the frame.
-   * The reveal uses it to park the dice in the lower third and leave the top of
-   * the screen clear for the flashed total.
+   * How far to tilt the camera up after aiming, pushing the subject down the
+   * frame so the flashed total has the top of the screen. This is the most the
+   * pose ever asks for; how much is actually applied depends on the room left
+   * over once the subject has been fitted.
    */
   compose: number;
   /** Exponential smoothing rate; higher snaps faster. */
@@ -27,8 +28,15 @@ const POSES: Record<CameraMode, Pose> = {
   rolling: { frameRadius: 6.2, pitch: 0.6, fov: 42, compose: 0, followRate: 5.2, orbitRate: 1.6, dollyRate: 2.6 },
   // Long lens, close in, and high enough to read the faces that landed up —
   // a low reveal angle sees the printed numbers edge-on and defeats the point.
-  reveal: { frameRadius: 2.8, pitch: 1.02, fov: 28, compose: 0.13, followRate: 3.0, orbitRate: 0.7, dollyRate: 1.5 },
+  reveal: { frameRadius: 2.4, pitch: 1.02, fov: 28, compose: 0.13, followRate: 3.0, orbitRate: 0.7, dollyRate: 1.5 },
 };
+
+/**
+ * Half the tray's inner diagonal, plus room for a die's own radius. Two dice in
+ * opposite corners genuinely need the whole tray in frame, so at that point there
+ * is no push-in left to give — but nothing is ever cut off.
+ */
+const REVEAL_MAX_RADIUS = Math.hypot(TRAY.innerWidth, TRAY.innerDepth) / 2 + 0.7;
 
 /** Frame-rate independent exponential smoothing. */
 const damp = (current: number, target: number, rate: number, dt: number) =>
@@ -77,6 +85,24 @@ export class CameraDirector {
     return radius / Math.sin(Math.min(vertical, horizontal) / 2);
   }
 
+  /**
+   * The largest upward tilt that still keeps the subject fully in shot.
+   *
+   * Tilting moves the subject down by that angle, so the room available is the
+   * frame's vertical half-angle less the angle the subject itself subtends. One
+   * small die leaves plenty; a pool spread across the tray already fills the
+   * frame and leaves almost none — tilting anyway would push the nearest dice off
+   * the bottom edge, which is exactly what it used to do.
+   */
+  private affordableCompose(wanted: number, subjectRadius: number, distance: number, fov: number): number {
+    if (wanted <= 0 || subjectRadius <= 0 || distance <= subjectRadius) return 0;
+    const verticalHalf = THREE.MathUtils.degToRad(fov) / 2;
+    const subjectHalf = Math.asin(Math.min(1, subjectRadius / distance));
+    // A little slack so a die's shadow and highlight do not graze the edge.
+    const room = verticalHalf - subjectHalf - 0.02;
+    return THREE.MathUtils.clamp(wanted, 0, Math.max(0, room));
+  }
+
   update(dt: number, bounds: THREE.Sphere) {
     this.time += dt;
     const pose = POSES[this.mode];
@@ -85,20 +111,21 @@ export class CameraDirector {
       this.desiredTarget.set(0, TRAY.floorY + 0.5, 0);
     } else {
       this.desiredTarget.copy(bounds.center);
-      // Keep the look-at inside the tray; a die skidding into a corner should not
-      // swing the camera off the set.
-      this.desiredTarget.x = THREE.MathUtils.clamp(this.desiredTarget.x, -TRAY.innerWidth * 0.36, TRAY.innerWidth * 0.36);
-      this.desiredTarget.z = THREE.MathUtils.clamp(this.desiredTarget.z, -TRAY.innerDepth * 0.36, TRAY.innerDepth * 0.36);
+      // A safety net against a stray value, not a restriction: the look-at has to
+      // be able to reach the tray walls, or a die resting in a corner never gets
+      // centred and the reveal appears not to pan at all.
+      this.desiredTarget.x = THREE.MathUtils.clamp(this.desiredTarget.x, -TRAY.innerWidth / 2, TRAY.innerWidth / 2);
+      this.desiredTarget.z = THREE.MathUtils.clamp(this.desiredTarget.z, -TRAY.innerDepth / 2, TRAY.innerDepth / 2);
       this.desiredTarget.y = THREE.MathUtils.clamp(this.desiredTarget.y, TRAY.floorY + 0.3, TRAY.floorY + 4);
     }
 
     let radius = pose.frameRadius;
     if (this.mode === 'rolling') radius = Math.max(pose.frameRadius, bounds.radius * 1.55);
     if (this.mode === 'reveal') {
-      // Has to hold every die, but capped: a pair that ends up in opposite corners
-      // would otherwise pull the shot back out to the wide idle framing and there
-      // would be no push-in left to see.
-      radius = THREE.MathUtils.clamp(bounds.radius * 1.3, pose.frameRadius, 5.2);
+      // Whatever the caller framed has to fit — under sum that is every die, under
+      // highest/lowest only the dice that won. The cap is the widest the tray can
+      // ever demand, so it trims surplus margin and never crops a die.
+      radius = THREE.MathUtils.clamp(bounds.radius * 1.15, pose.frameRadius, REVEAL_MAX_RADIUS);
       this.revealTime += dt;
     }
 
@@ -114,6 +141,7 @@ export class CameraDirector {
     }
 
     this.desiredDistance = this.fitDistance(radius, fov);
+    const compose = this.affordableCompose(pose.compose, bounds.radius, this.desiredDistance, fov);
 
     // Slow drift keeps the frame alive; the reveal adds a touch of orbit for parallax.
     const drift = Math.sin(this.time * 0.11) * 0.1 + Math.sin(this.time * 0.043) * 0.06;
@@ -127,7 +155,7 @@ export class CameraDirector {
     this.yaw = damp(this.yaw, desiredYaw, pose.orbitRate, dt);
     this.pitch = damp(this.pitch, pose.pitch + portraitLift, pose.orbitRate, dt);
     this.fov = damp(this.fov, fov, pose.dollyRate, dt);
-    this.compose = damp(this.compose, pose.compose, pose.dollyRate, dt);
+    this.compose = damp(this.compose, compose, pose.dollyRate, dt);
 
     this.camera.fov = this.fov;
     this.camera.updateProjectionMatrix();

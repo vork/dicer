@@ -20,6 +20,11 @@ export interface Outcome {
   value: number;
   /** Index of the die the result came from, or -1 when every die contributed. */
   keptIndex: number;
+  /**
+   * Every die that produced the winning value — more than one when they tie.
+   * Empty under sum, where no die is singled out.
+   */
+  keptIndices: number[];
   critical: boolean;
   fumble: boolean;
 }
@@ -36,7 +41,7 @@ const isNatural = (roll: Roll | undefined, value: number) => roll?.type === 'd20
  */
 export function resolveRoll(rolls: Roll[], mode: ResultMode): Outcome {
   if (rolls.length === 0) {
-    return { mode, value: 0, keptIndex: -1, critical: false, fumble: false };
+    return { mode, value: 0, keptIndex: -1, keptIndices: [], critical: false, fumble: false };
   }
 
   if (mode === 'sum') {
@@ -47,6 +52,7 @@ export function resolveRoll(rolls: Roll[], mode: ResultMode): Outcome {
       mode,
       value,
       keptIndex: -1,
+      keptIndices: [],
       critical: isNatural(lone, 20),
       fumble: isNatural(lone, 1),
     };
@@ -63,6 +69,8 @@ export function resolveRoll(rolls: Roll[], mode: ResultMode): Outcome {
     mode,
     value: kept.value,
     keptIndex,
+    // On a tie every die showing that value is equally the winner.
+    keptIndices: rolls.flatMap((roll, i) => (roll.value === kept.value ? [i] : [])),
     critical: isNatural(kept, 20),
     fumble: isNatural(kept, 1),
   };

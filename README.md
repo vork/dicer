@@ -18,7 +18,8 @@ speed of the flick become the direction and force of the throw.
 gets flashed. Highest and lowest are advantage and disadvantage: the dice that did
 not count stay in the breakdown, dimmed and struck through, and a natural 20 or 1
 is judged on the die that actually counted — a 20 you dropped to disadvantage is
-not a critical.
+not a critical. The mode also decides what the reveal closes in on: every die
+under sum, only the dice that won under highest and lowest.
 
 ## How the numbers are detected
 
@@ -123,9 +124,10 @@ where a fair die belongs.
 | `npm run dev` | dev server |
 | `npm run build` | typecheck + production build |
 | `npm run assets` | regenerate `public/dice/*` from the source GLB |
-| `npm run verify` | all three checks below |
+| `npm run verify` | all four checks below |
 | `npm run verify:values` | opposite-face-sum invariant on the tables |
-| `npm run verify:reading` | every slot reads back from every yaw |
+| `npm run verify:reading` | every slot reads back from every yaw, and pool resolution |
+| `npm run verify:camera` | the reveal frames dice anywhere in the tray, uncropped |
 | `npm run verify:physics` | settle, containment and distribution over many rolls |
 | `npm run verify:build` | the built site runs from a sub-path, with no 404s |
 | `npm run calibrate` | regenerate the face contact sheets |

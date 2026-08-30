@@ -276,8 +276,8 @@ export class Hud {
     if (rolls.length > 1) {
       rolls.forEach((roll, index) => {
         const chip = document.createElement('span');
-        if (outcome.keptIndex >= 0) {
-          chip.classList.add(index === outcome.keptIndex ? 'kept' : 'dropped');
+        if (outcome.keptIndices.length) {
+          chip.classList.add(outcome.keptIndices.includes(index) ? 'kept' : 'dropped');
         }
         // Mark a natural roll on its own chip too — in a sum it would otherwise
         // disappear into the total.

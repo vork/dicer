@@ -8,7 +8,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "assets": "node tools/build-assets.mjs",
-    "verify": "npm run verify:values && npm run verify:reading && npm run verify:physics",
+    "verify": "npm run verify:values && npm run verify:reading && npm run verify:camera && npm run verify:physics",
     "verify:values": "node tools/verify-values.mjs",
     "verify:reading": "node tools/verify-runtime.mjs",
     "verify:physics": "node tools/verify-physics.mjs --trials 150",
@@ -16,7 +16,8 @@
     "face-sheets": "node tools/face-sheets.mjs",
     "shoot": "node tools/shoot.mjs",
     "diagnose": "node tools/diagnose.mjs",
-    "verify:build": "node tools/verify-build.mjs"
+    "verify:build": "node tools/verify-build.mjs",
+    "verify:camera": "node tools/verify-camera.mjs"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.20.0",

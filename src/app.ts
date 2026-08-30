@@ -45,6 +45,8 @@ export class App {
   private setRequest = 0;
   private revealTimer = 0;
   private revealing = false;
+  /** Which dice the reveal closes in on; empty means all of them. */
+  private revealFocus: number[] = [];
   private running = false;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -172,6 +174,7 @@ export class App {
   private setPool(pool: DieType[]) {
     this.diceWorld.setPool(pool);
     this.revealing = false;
+    this.revealFocus = [];
     this.director.setMode('idle');
   }
 
@@ -188,6 +191,7 @@ export class App {
     if (this.diceWorld.dice.length === 0) return;
     this.diceWorld.roll(direction, power);
     this.revealing = false;
+    this.revealFocus = [];
     this.revealTimer = 0;
     this.director.setMode('rolling');
     this.hud.setRolling(true);
@@ -212,7 +216,9 @@ export class App {
       }
     }
 
-    this.diceWorld.getBounds(this.bounds);
+    // Under highest/lowest the shot tightens onto the dice that won; under sum
+    // every die counts, so every die stays in frame.
+    this.diceWorld.getBounds(this.bounds, this.revealing ? this.revealFocus : undefined);
     this.director.update(delta, this.bounds);
     this.postFx.setFocus(this.director.revealProgress);
     this.postFx.render(delta);
@@ -224,6 +230,7 @@ export class App {
     this.hud.showResult(rolls, outcome);
     this.audio.reveal(outcome.critical);
 
+    this.revealFocus = outcome.keptIndices;
     this.revealing = true;
     this.revealTimer = 0;
     this.director.setMode('reveal');

@@ -175,8 +175,11 @@ body {
 
 /* Under highest/lowest, the dice that did not count recede but stay readable —
    seeing what was dropped is the point of the mode. */
+/* Under highest/lowest the camera closes in on the winners, so these chips are
+   the only remaining record of what was rolled — recede, but stay readable
+   against the lit tray rim. */
 .reveal-breakdown span.dropped {
-  opacity: 0.42;
+  opacity: 0.55;
 }
 
 .reveal-breakdown span.dropped b {
