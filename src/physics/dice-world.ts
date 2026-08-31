@@ -406,14 +406,8 @@ export class DiceWorld {
         true,
       );
     } else {
-      die.body.setTranslation(
-        {
-          x: (Math.random() - 0.5) * TRAY.innerWidth * 0.35,
-          y: TRAY.floorY + 3.2,
-          z: (Math.random() - 0.5) * TRAY.innerDepth * 0.35,
-        },
-        true,
-      );
+      const spot = this.clearSpot(die);
+      die.body.setTranslation({ x: spot.x, y: TRAY.floorY + 3.2, z: spot.z }, true);
       die.body.setRotation(randomQuaternion(), true);
       die.body.setLinvel({ x: 0, y: -3, z: 0 }, true);
       die.body.setAngvel(
@@ -423,6 +417,38 @@ export class DiceWorld {
     }
 
     die.body.wakeUp();
+  }
+
+  /**
+   * A floor position clear of the other dice, for re-dropping a cocked one.
+   *
+   * Dropping it straight onto a neighbour is worse than leaving it: the solver
+   * resolves that overlap with a large impulse, and in a full pool that was enough
+   * to fire a die through the tray wall. Sampling a handful of spots and taking
+   * the roomiest costs nothing and cannot land inside anything.
+   */
+  private clearSpot(die: Die): { x: number; z: number } {
+    const wanted = this.assets.info[die.type].radius * 2;
+    let best = { x: 0, z: 0 };
+    let bestGap = -Infinity;
+
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const x = (Math.random() - 0.5) * TRAY.innerWidth * 0.55;
+      const z = (Math.random() - 0.5) * TRAY.innerDepth * 0.55;
+      let gap = Infinity;
+      for (const other of this.dice) {
+        if (other === die) continue;
+        const t = other.body.translation();
+        gap = Math.min(gap, Math.hypot(t.x - x, t.z - z) - this.assets.info[other.type].radius);
+      }
+      if (gap > bestGap) {
+        bestGap = gap;
+        best = { x, z };
+      }
+      if (gap > wanted) break;
+    }
+
+    return best;
   }
 
   private syncMeshes() {

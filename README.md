@@ -113,11 +113,21 @@ upward face is more than a few degrees off vertical — and settled before it is
 read. A kick in place frees a die propped on a neighbour, but not one wedged into
 a corner, where the wall being pushed against is the wall it rebounds off. So
 after two attempts the die is picked up and dropped again near the middle of the
-tray, which is what a player does with a cocked die and, given a fresh uniform
+tray, into a spot sampled clear of the other dice — dropping it onto a neighbour
+resolves the overlap with an impulse large enough to fire a die through the wall.
+That is what a player does with a cocked die and, given a fresh uniform
 orientation, is a fair re-roll. Before that, four kicks and then acceptance meant
 a wedged d4 could be read at 44 degrees off vertical — a wrong number about once
 in fifteen hundred rolls, which `verify:physics` now catches by checking that a
 settled die rests at exactly its inradius above the floor.
+
+The reveal also stands the camera up as far as it needs to in order to see over
+the tray wall. The rim is 2.3 units tall, so at the reveal's usual 58 degrees a
+die within about 1.2 units of the near wall is simply hidden behind it — and dice
+come to rest against walls constantly. The elevation that clears the rim is
+computed from where the dice actually are, so a die by the wall is viewed from
+close to overhead, which is also the best angle for reading the face that landed
+up, while a die in the open keeps the lower, more three-dimensional angle.
 
 Where the close-up puts the dice is measured, not assumed. The app reads the gap
 between the bottom of the flashed total and the top of the controls and hands the

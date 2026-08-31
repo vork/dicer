@@ -36,7 +36,9 @@
       ];
 
       /** Runs the director to a steady state on a fixed bounds sphere. */
-      function settleCamera(aspect, sphere, band, seconds = 6) {
+      // Twelve seconds, because the camera moves deliberately slowly: at the
+      // reveal's orbit rate six would still be a few percent short of arrival.
+      function settleCamera(aspect, sphere, band, seconds = 12) {
         const director = new CameraDirector(aspect);
         director.setMode('reveal');
         director.setSubjectBand(band.top, band.bottom);
@@ -121,6 +123,41 @@
           if (worstX > 1 || worstY > 1) {
             failures.push(`${label}: subject is cropped, extremes reach ${worstX.toFixed(2)}, ${worstY.toFixed(2)}`);
           }
+        }
+      }
+
+      // --- a die against a wall must not be hidden behind the rim ---
+      // The wall is a solid ring standing on the floor. Walk the sight line from
+      // the camera to the die and check it never passes through that solid.
+      const outerHalfW = TRAY.innerWidth / 2 + TRAY.wallThickness;
+      const outerHalfD = TRAY.innerDepth / 2 + TRAY.wallThickness;
+      const insideWall = (p) =>
+        (Math.abs(p.x) > TRAY.innerWidth / 2 || Math.abs(p.z) > TRAY.innerDepth / 2) &&
+        Math.abs(p.x) <= outerHalfW &&
+        Math.abs(p.z) <= outerHalfD &&
+        p.y >= TRAY.floorY &&
+        p.y <= TRAY.floorY + TRAY.wallHeight;
+
+      for (const [viewName, aspect] of viewports) {
+        for (const [spotName, x, z] of spots) {
+          const centre = new THREE.Vector3(x, TRAY.floorY + DIE_RADIUS, z);
+          const sphere = new THREE.Sphere(centre.clone(), DIE_RADIUS);
+          const camera = settleCamera(aspect, sphere, BAND[viewName]);
+          camera.updateMatrixWorld(true);
+
+          let blocked = false;
+          const step = new THREE.Vector3();
+          for (let t = 0; t <= 1; t += 1 / 400) {
+            step.copy(camera.position).lerp(centre, t);
+            if (insideWall(step)) { blocked = true; break; }
+          }
+
+          const elevation = THREE.MathUtils.radToDeg(
+            Math.asin((camera.position.y - centre.y) / camera.position.distanceTo(centre)),
+          );
+          const label = `${viewName} / ${spotName}`;
+          lines.push(`${label.padEnd(34)} camera ${elevation.toFixed(0)} deg up, rim ${blocked ? 'BLOCKS' : 'clear'}`);
+          if (blocked) failures.push(`${label}: the tray rim stands between the camera and the die`);
         }
       }
 

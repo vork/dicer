@@ -54,7 +54,7 @@ try {
       () =>
         new Promise((resolve) => {
           let seen = 0;
-          const tick = () => (++seen >= 90 ? resolve(seen) : requestAnimationFrame(tick));
+          const tick = () => (++seen >= 150 ? resolve(seen) : requestAnimationFrame(tick));
           requestAnimationFrame(tick);
         }),
     );

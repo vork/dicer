@@ -94,7 +94,7 @@ try {
   // idle framing before a screenshot lands, which made these stills a picture of
   // the wrong camera. Hold it open, and give the dolly time to arrive.
   await page.evaluate(() => window.dicer.debug.holdReveal(true));
-  await frames(70);
+  await frames(130);
   // Grab it promptly: the result flash is a 2.6s CSS animation, and headless
   // frames are slow enough that waiting long would miss it entirely.
   const flash = await page.evaluate(() => ({

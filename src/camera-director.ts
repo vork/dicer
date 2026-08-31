@@ -22,12 +22,12 @@ interface Pose {
 
 const POSES: Record<CameraMode, Pose> = {
   // Wide and high: the whole tray, held still enough to read the controls.
-  idle: { frameRadius: 7.7, pitch: 0.8, fov: 36, placeSubject: false, followRate: 1.8, orbitRate: 1.2, dollyRate: 1.6 },
+  idle: { frameRadius: 7.7, pitch: 0.8, fov: 36, placeSubject: false, followRate: 1.2, orbitRate: 0.8, dollyRate: 1.1 },
   // Lower and looser, chasing the cluster while it scatters.
-  rolling: { frameRadius: 6.2, pitch: 0.6, fov: 42, placeSubject: false, followRate: 5.2, orbitRate: 1.6, dollyRate: 2.6 },
+  rolling: { frameRadius: 6.2, pitch: 0.6, fov: 42, placeSubject: false, followRate: 3.6, orbitRate: 1.1, dollyRate: 1.8 },
   // Long lens, close in, and high enough to read the faces that landed up —
   // a low reveal angle sees the printed numbers edge-on and defeats the point.
-  reveal: { frameRadius: 2.4, pitch: 1.02, fov: 28, placeSubject: true, followRate: 3.0, orbitRate: 0.7, dollyRate: 1.5 },
+  reveal: { frameRadius: 2.4, pitch: 1.02, fov: 28, placeSubject: true, followRate: 2.0, orbitRate: 0.5, dollyRate: 1.1 },
 };
 
 /**
@@ -39,6 +39,15 @@ const REVEAL_MAX_RADIUS = Math.hypot(TRAY.innerWidth, TRAY.innerDepth) / 2 + 0.7
 
 /** How much further than a frame-filling shot the band may pull the camera back. */
 const BAND_FIT_LIMIT = 1.4;
+
+/**
+ * Steepest the reveal will tip. Just short of straight down: at exactly vertical
+ * the look-at has no horizontal component left and the camera's roll is undefined.
+ */
+const MAX_REVEAL_PITCH = 1.45;
+
+/** Clearance over the rim, so a die by the wall is not grazing the edge of it. */
+const RIM_CLEARANCE = 0.45;
 
 /** Frame-rate independent exponential smoothing. */
 const damp = (current: number, target: number, rate: number, dt: number) =>
@@ -159,6 +168,39 @@ export class CameraDirector {
     return THREE.MathUtils.clamp((this.bandTop + this.bandBottom) / 2, lowest, highest);
   }
 
+  /**
+   * The camera elevation needed to see over the tray wall.
+   *
+   * The rim stands 2.3 units tall and the camera looks in over it, so at the
+   * reveal's usual angle anything within about 1.2 units of the near wall is
+   * simply hidden behind it — and dice come to rest against walls constantly.
+   * Standing the camera up until the sight line clears the rim fixes that; close
+   * to a wall it ends up nearly overhead, which is also the best angle for
+   * reading the face that landed up.
+   */
+  private pitchToClearRim(target: THREE.Vector3): number {
+    const towardCameraX = Math.sin(this.yaw);
+    const towardCameraZ = Math.cos(this.yaw);
+
+    // Horizontal distance from the subject out to the inner face of the wall,
+    // along the direction the camera is looking in from.
+    const reach = (offset: number, half: number, direction: number) => {
+      if (Math.abs(direction) < 1e-4) return Infinity;
+      return (direction > 0 ? half - offset : -half - offset) / direction;
+    };
+    const distance = Math.max(
+      0,
+      Math.min(
+        reach(target.x, TRAY.innerWidth / 2, towardCameraX),
+        reach(target.z, TRAY.innerDepth / 2, towardCameraZ),
+      ),
+    );
+
+    const rise = TRAY.floorY + TRAY.wallHeight + RIM_CLEARANCE - target.y;
+    if (rise <= 0) return 0;
+    return Math.atan2(rise, distance);
+  }
+
   update(dt: number, bounds: THREE.Sphere) {
     this.time += dt;
     const pose = POSES[this.mode];
@@ -196,7 +238,7 @@ export class CameraDirector {
     let fov = pose.fov;
     if (this.mode === 'reveal') {
       // Ease the last of the push in over the first second of the hold.
-      fov -= 2.5 * (1 - Math.exp(-this.revealTime * 1.4));
+      fov -= 2.5 * (1 - Math.exp(-this.revealTime * 1.0));
     }
 
     this.desiredDistance = this.fitDistance(radius, fov);
@@ -219,7 +261,7 @@ export class CameraDirector {
 
     // Slow drift keeps the frame alive; the reveal adds a touch of orbit for parallax.
     const drift = Math.sin(this.time * 0.11) * 0.1 + Math.sin(this.time * 0.043) * 0.06;
-    const revealOrbit = this.mode === 'reveal' ? -0.16 * (1 - Math.exp(-this.revealTime * 0.7)) : 0;
+    const revealOrbit = this.mode === 'reveal' ? -0.16 * (1 - Math.exp(-this.revealTime * 0.5)) : 0;
     const desiredYaw = drift + revealOrbit;
 
     this.target.x = damp(this.target.x, this.desiredTarget.x, pose.followRate, dt);
@@ -227,7 +269,11 @@ export class CameraDirector {
     this.target.z = damp(this.target.z, this.desiredTarget.z, pose.followRate, dt);
     this.distance = damp(this.distance, this.desiredDistance, pose.dollyRate, dt);
     this.yaw = damp(this.yaw, desiredYaw, pose.orbitRate, dt);
-    this.pitch = damp(this.pitch, pose.pitch + portraitLift, pose.orbitRate, dt);
+    let desiredPitch = pose.pitch + portraitLift;
+    if (pose.placeSubject) {
+      desiredPitch = Math.max(desiredPitch, Math.min(this.pitchToClearRim(this.desiredTarget), MAX_REVEAL_PITCH));
+    }
+    this.pitch = damp(this.pitch, desiredPitch, pose.orbitRate, dt);
     this.fov = damp(this.fov, fov, pose.dollyRate, dt);
     this.compose = damp(this.compose, compose, pose.dollyRate, dt);
 
