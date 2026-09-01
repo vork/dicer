@@ -8,8 +8,8 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import http from 'node:http';
 import { chromium } from 'playwright';
+import { serveBuild } from './static-server.mjs';
 
 const args = Object.fromEntries(
   process.argv.slice(2).join(' ').split('--').filter(Boolean).map((s) => {
@@ -19,52 +19,13 @@ const args = Object.fromEntries(
 );
 const prefix = args.prefix || '/dicer/';
 const root = path.resolve('dist');
-const port = 5194;
 
 if (!fs.existsSync(path.join(root, 'index.html'))) {
   console.error('no dist/index.html — run `npm run build` first');
   process.exit(1);
 }
 
-const MIME = {
-  '.html': 'text/html',
-  '.js': 'text/javascript',
-  '.css': 'text/css',
-  '.json': 'application/json',
-  '.webp': 'image/webp',
-  '.png': 'image/png',
-  '.svg': 'image/svg+xml',
-  '.glb': 'model/gltf-binary',
-  '.wasm': 'application/wasm',
-  '.woff2': 'font/woff2',
-  '.map': 'application/json',
-};
-
-const missing = [];
-
-const server = http.createServer((request, response) => {
-  const url = new URL(request.url, `http://127.0.0.1:${port}`);
-  if (!url.pathname.startsWith(prefix)) {
-    missing.push(`${url.pathname} (outside ${prefix})`);
-    response.writeHead(404).end('not found');
-    return;
-  }
-
-  let relative = url.pathname.slice(prefix.length) || 'index.html';
-  if (relative.endsWith('/')) relative += 'index.html';
-  // Resolve inside dist and refuse anything that climbs out of it.
-  const file = path.join(root, relative);
-  if (!file.startsWith(root) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
-    missing.push(url.pathname);
-    response.writeHead(404).end('not found');
-    return;
-  }
-
-  response.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream' });
-  fs.createReadStream(file).pipe(response);
-});
-
-await new Promise((resolve) => server.listen(port, '127.0.0.1', resolve));
+const { server, missing, url } = await serveBuild({ root, prefix, port: 5194 });
 
 const browser = await chromium.launch({
   executablePath: process.env.PLAYWRIGHT_CHROMIUM || undefined,
@@ -78,7 +39,7 @@ page.on('console', (message) => { if (message.type() === 'error') consoleErrors.
 
 let failed = false;
 try {
-  await page.goto(`http://127.0.0.1:${port}${prefix}`, { waitUntil: 'load' });
+  await page.goto(url, { waitUntil: 'load' });
   await page.waitForFunction(
     () => {
       const loader = document.getElementById('loader');
@@ -107,12 +68,10 @@ try {
 }
 
 // The server's own 404 log is the authoritative record, so generic
-// "Failed to load resource" console lines would only double-count it. Google
-// Fonts being unreachable in a sandbox is not a build defect either.
+// "Failed to load resource" console lines would only double-count it. Nothing is
+// fetched from a third party any more, so there is nothing else to excuse.
 const realMisses = missing;
-const realErrors = consoleErrors.filter(
-  (e) => !/fonts\.googleapis|fonts\.gstatic|ERR_CONNECTION_RESET|Failed to load resource/.test(e),
-);
+const realErrors = consoleErrors.filter((e) => !/Failed to load resource/.test(e));
 
 if (realMisses.length) {
   console.error(`\n  FAIL ${realMisses.length} asset(s) 404ed under ${prefix}:`);

@@ -95,6 +95,44 @@ it serves `dist/` from a sub-path, loads it, rolls once, and fails on any 404 �
 the failure mode where an absolute asset path works on the dev server and breaks
 in production.
 
+## Installing it
+
+The build ships a web app manifest and a service worker, so the site can be
+installed to a home screen and then runs with no network at all — which is the
+point for a dice roller, since the moment you want one you are usually sitting at
+a table rather than near good reception. Pages serves over HTTPS, which is what
+service workers require; on the dev server the app is a plain page, as the plugin
+leaves the worker out of `npm run dev`.
+
+Everything is precached, not fetched on demand: the dice mesh, the face table,
+Rapier's wasm chunk, and all seven colourways. A colourway pulled from the network
+when you tapped it would fail exactly when the app was supposed to be working
+offline, and the whole payload is only ~5.8MB. Updates install silently and take
+effect on the next launch — there is no state worth interrupting a roll for.
+
+`npm run verify:pwa` is the check that this is real rather than declared. It
+serves the build from a sub-path, waits for the worker to install and claim the
+page, validates the manifest and that every icon resolves, then cuts the network
+at the browser and reloads. The app has to boot, complete a three-die roll, prove
+the display face is genuinely local, and serve all 21 dice assets from cache —
+including the six colourways that were never displayed while the network was up,
+which is what catches a precache covering only the paths a first visit happened to
+touch. Stripping the colourways out of the precache manifest by hand is enough to
+make it fail, which is how I know it is looking.
+
+The two typefaces are vendored rather than linked, by `npm run fonts`. Cormorant
+Garamond is what the flashed number is set in, and a stylesheet fetched from
+Google would have failed offline and dropped the reveal into Georgia — the app
+would still work, but it would not look like itself. Both families are variable
+fonts, so all six weights are two files and 84KB in total; only the latin subset
+is kept, since nothing here renders text the user supplies. Self-hosting also
+takes a render-blocking third-party request out of the first load.
+
+`npm run icons` regenerates the launcher icons from `public/favicon.svg`. The
+maskable one drops the background plate and insets the mark, because launchers
+crop that icon to their own shape and a mark sitting at the edge loses its
+corners.
+
 ## Notes on the simulation
 
 One world unit is about 20mm, so gravity runs at its true scaled value of ~490
@@ -188,8 +226,11 @@ construction, only by measurement.
 | `npm run verify:pairs` | two dice in one throw land independently of each other |
 | `npm run verify:audio` | impacts make sound, and the toggle silences and restores it |
 | `npm run verify:build` | the built site runs from a sub-path, with no 404s |
+| `npm run verify:pwa` | the installed app boots and rolls with the network cut |
 | `npm run calibrate` | regenerate the face contact sheets |
 | `npm run shoot` | screenshot the running app at each stage |
+| `npm run icons` | regenerate the launcher icons from the favicon |
+| `npm run fonts` | re-vendor the web fonts into `public/fonts/` |
 
 The headless tools need a Chromium; set `PLAYWRIGHT_CHROMIUM` if Playwright's own
 download is not present.
@@ -198,3 +239,6 @@ download is not present.
 
 Dice models: [RPG Dice Set](https://sketchfab.com/3d-models/rpg-dice-set-2498c370c56842f89fa3d7096c72ed56)
 by [ghosted](https://sketchfab.com/dianaavlis2002), CC-BY-4.0.
+
+Typefaces: Cormorant Garamond by Christian Thalmann and Inter by Rasmus Andersson,
+both under the SIL Open Font License 1.1.
