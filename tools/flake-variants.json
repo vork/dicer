@@ -1,0 +1,10 @@
+[
+  { "label": "a-off",       "strength": 0 },
+  { "label": "b-default"                  },
+  { "label": "c-stronger",  "strength": 1.8 },
+  { "label": "d-sparse",    "coverage": 0.2 },
+  { "label": "e-dense",     "coverage": 0.55 },
+  { "label": "f-coarse",    "density": 40 },
+  { "label": "g-fine",      "density": 85 },
+  { "label": "h-tight",     "polish": 0.015 }
+]

@@ -88,6 +88,8 @@ export interface PostFx {
   render(delta: number): void;
   /** 0 = neutral, 1 = tightened for the reveal. */
   setFocus(value: number): void;
+  /** Exposed for tuning from the headless shooter. */
+  setBloom(strength: number, radius: number, threshold: number): void;
   dispose(): void;
 }
 
@@ -100,7 +102,13 @@ export function createPostFx(
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
 
-  const bloom = new UnrealBloomPass(size, 0.45, 0.72, 0.95);
+  // Bloom is here for atmosphere, not for glow. It used to start at 0.95, which
+  // in linear HDR is below what a clearcoat highlight on a die reaches, so whole
+  // corners of a die bloomed into a soft white blob and took the numerals with
+  // them. Starting above 1.0 confines it to genuinely blown highlights — the
+  // flake glints, the hot edge of the pool of light — and a shorter radius keeps
+  // what does bloom tight enough to still read as a highlight.
+  const bloom = new UnrealBloomPass(size, 0.26, 0.55, 1.08);
   composer.addPass(bloom);
 
   composer.addPass(new OutputPass());
@@ -126,6 +134,11 @@ export function createPostFx(
     },
     setFocus(value) {
       grade.uniforms.uFocus.value = value;
+    },
+    setBloom(strength, radius, threshold) {
+      bloom.strength = strength;
+      bloom.radius = radius;
+      bloom.threshold = threshold;
     },
     dispose() {
       bloom.dispose();

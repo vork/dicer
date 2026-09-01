@@ -21,6 +21,7 @@
     "verify:build": "node tools/verify-build.mjs",
     "verify:pwa": "node tools/verify-pwa.mjs",
     "calibrate": "node tools/calibrate.mjs --set set7 --mode face --zoom 0.62",
+    "flakes": "node tools/flake-sheet.mjs",
     "face-sheets": "node tools/face-sheets.mjs",
     "shoot": "node tools/shoot.mjs",
     "diagnose": "node tools/diagnose.mjs"

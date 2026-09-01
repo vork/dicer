@@ -133,6 +133,63 @@ maskable one drops the background plate and insets the mark, because launchers
 crop that icon to their own shape and a mark sitting at the edge loses its
 corners.
 
+## How the dice are shaded
+
+The dice are cast resin over metallic flake, built the way automotive paint is: a
+pigmented base loaded with tiny aluminium flakes, under a clear coat. Each flake
+is a mirror lying at its own slight angle, so at any moment only the few whose
+tilt happens to line a light up with your eye fire — and which few that is
+changes as the die turns. That is why the sparkle crawls across a car as you walk
+past it, and it is why this cannot be a texture: a painted-on glitter map slides
+with the surface instead of firing and dying.
+
+So the flakes are procedural, from a lattice in the die's own object space. They
+are embedded in the resin, so they have to be locked to the die and tumble with
+it. Each one reflects the environment map through three's `getIBLRadiance` at
+near-mirror roughness, and that is the whole trick: the same little room that
+lights everything else is what the flakes glint at, so a flake tilted toward the
+key panel goes white-hot, one tilted at the cool rim strip goes blue, and one
+facing the black shell stays dark. Nothing has to be told where the lights are.
+
+The first version did have to, and it had a tell. It evaluated glints against a
+hand-copied list of the scene's light directions, and on a flat die face the
+half-vector is constant across the whole facet — so a face whose half-vector fell
+outside the cone the flakes can tilt into had no sparkle at all, while its
+neighbour was covered. Reflecting the environment instead makes that impossible
+and drops the duplicated list of light positions.
+
+The base stays non-metallic. Turning the whole material metallic would take the
+painted numerals down with it, and the numerals are the entire point of the app.
+
+Flakes go sub-pixel long before the die does, and a sub-pixel flake field is just
+crawling noise, so each of the two lattices fades out as its cells approach one
+per pixel — what a mip chain does for a texture, done by hand. The dice come up
+glittering as the reveal closes in and settle to a quiet satin at the wide
+framing. Measuring that footprint with `fwidth` is what the first pass did and it
+was wrong by roughly a factor of two: it sums both derivatives across all three
+components, which faded the sparkle out while the flakes were still two pixels
+wide and left the reveal looking untouched. `max(length(dFdx), length(dFdy))` is
+cells per pixel along the worse screen axis, which is the thing actually being
+asked about.
+
+`npm run flakes` is the tuning rig: one roll, then every entry in
+`tools/flake-variants.json` rendered as a magnified crop of the same settled die
+and composited into a contact sheet. A variant can name a colourway too, so one
+sweep covers all seven. It asserts first that the flake uniform reached a
+compiled program, because a string replace that quietly matched nothing in
+`onBeforeCompile` looks exactly like a shader that is merely too subtle, and
+knowing which of the two you have is the difference between tuning numbers and
+debugging plumbing.
+
+Bloom used to start at 0.95, which in linear HDR is below what a clearcoat
+highlight on a die reaches, so whole corners of a die bloomed into a soft white
+blob and took the numerals with them. It now starts above 1.0 at roughly half the
+strength and a shorter radius, which confines it to genuinely blown highlights
+and leaves the flakes as the thing catching the light.
+
+Every flake parameter is a uniform, exposed through `window.dicer.debug.setFlakes`
+along with `setBloom`, which is how the contact sheets are swept without a rebuild.
+
 ## Notes on the simulation
 
 One world unit is about 20mm, so gravity runs at its true scaled value of ~490
@@ -228,6 +285,7 @@ construction, only by measurement.
 | `npm run verify:build` | the built site runs from a sub-path, with no 404s |
 | `npm run verify:pwa` | the installed app boots and rolls with the network cut |
 | `npm run calibrate` | regenerate the face contact sheets |
+| `npm run flakes` | contact sheet of flake settings on one settled die |
 | `npm run shoot` | screenshot the running app at each stage |
 | `npm run icons` | regenerate the launcher icons from the favicon |
 | `npm run fonts` | re-vendor the web fonts into `public/fonts/` |

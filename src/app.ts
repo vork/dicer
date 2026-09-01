@@ -4,6 +4,7 @@ import type RAPIER from '@dimforge/rapier3d-compat';
 import { loadDiceAssets, loadSetTextures, type DiceAssets, type DiceSet } from './assets';
 import { createEnvironment, createLights } from './scene/environment';
 import { createTray, TRAY } from './scene/tray';
+import { createDiceMaterial, type DiceMaterial, type FlakeSettings } from './scene/dice-material';
 import { createPostFx, type PostFx } from './scene/postfx';
 import { DiceWorld } from './physics/dice-world';
 import { CameraDirector } from './camera-director';
@@ -40,6 +41,7 @@ export class App {
   private postFx!: PostFx;
   private hud!: Hud;
   private input!: ThrowInput;
+  private dice!: DiceMaterial;
   private diceMaterial!: THREE.MeshPhysicalMaterial;
 
   private activeSet!: DiceSet;
@@ -95,19 +97,8 @@ export class App {
     const tray = createTray();
     this.scene.add(tray.group);
 
-    this.diceMaterial = new THREE.MeshPhysicalMaterial({
-      roughness: 1,
-      metalness: 0,
-      // Cast resin: a clear coat over a pigmented, slightly translucent body.
-      // A near-mirror clearcoat put a blown highlight across whole faces and hid
-      // the very numbers the reveal is meant to show; this spreads it out.
-      clearcoat: 0.62,
-      clearcoatRoughness: 0.26,
-      sheen: 0.2,
-      sheenRoughness: 0.4,
-      envMapIntensity: 1.1,
-      normalScale: new THREE.Vector2(0.85, 0.85),
-    });
+    this.dice = createDiceMaterial();
+    this.diceMaterial = this.dice.material;
     await this.applySet(this.activeSet);
 
     this.diceWorld = new DiceWorld(this.rapier, this.assets, this.diceMaterial);
@@ -256,6 +247,10 @@ export class App {
       renderer: this.renderer,
       camera: this.director.camera,
       diceMaterial: this.diceMaterial,
+      setFlakes: (settings: Partial<FlakeSettings>) => this.dice.setFlakes(settings),
+      getFlakes: () => this.dice.getFlakes(),
+      setBloom: (strength: number, radius: number, threshold: number) =>
+        this.postFx.setBloom(strength, radius, threshold),
       roll: (x: number, z: number, power: number) => this.throwDice(new THREE.Vector2(x, z), power),
       setPool: (pool: DieType[]) => this.hud.setPool(pool),
       setSet: (id: string) => this.selectSet(id),
