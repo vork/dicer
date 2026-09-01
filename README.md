@@ -172,6 +172,23 @@ wide and left the reveal looking untouched. `max(length(dFdx), length(dFdy))` is
 cells per pixel along the worse screen axis, which is the thing actually being
 asked about.
 
+What makes them read as flakes rather than as sugar is contrast. The environment's
+own range is too gentle to say "this flake caught a light and that one did not",
+so each flake is weighted by its own brightness before it is added: the majority
+facing the dark shell fall away, and the few that found a panel keep their level,
+which is well past 1.0 and straight into the bloom pass. That is the difference
+between an even grey speckle and a handful of points that flare and die as the die
+turns — which is what the effect is for. The weighting is normalised against the
+key panel's radiance so that raising the contrast redistributes brightness instead
+of amplifying it, and strength and contrast can be tuned apart.
+
+Two settings matter more than they look. Flake roughness is kept near zero,
+because a flake given even a few times that reflects a blur of the whole room and
+sits there softly lit whichever way the die turns, which is the opposite of a
+glint. And the tilt spread is wider than real paint uses: real paint is lit by a
+whole sky, while these flakes have one small room to find, so they have to point
+in more directions for any of them to find it.
+
 `npm run flakes` is the tuning rig: one roll, then every entry in
 `tools/flake-variants.json` rendered as a magnified crop of the same settled die
 and composited into a contact sheet. A variant can name a colourway too, so one
@@ -216,13 +233,38 @@ a wedged d4 could be read at 44 degrees off vertical — a wrong number about on
 in fifteen hundred rolls, which `verify:physics` now catches by checking that a
 settled die rests at exactly its inradius above the floor.
 
-The reveal also stands the camera up as far as it needs to in order to see over
-the tray wall. The rim is 2.3 units tall, so at the reveal's usual 58 degrees a
-die within about 1.2 units of the near wall is simply hidden behind it — and dice
-come to rest against walls constantly. The elevation that clears the rim is
-computed from where the dice actually are, so a die by the wall is viewed from
-close to overhead, which is also the best angle for reading the face that landed
-up, while a die in the open keeps the lower, more three-dimensional angle.
+The reveal also has to get the tray wall out of the way. The rim is 2.3 units
+tall, so at the reveal's usual 58 degrees a die within about 1.2 units of the near
+wall is simply hidden behind it — and dice come to rest against walls constantly.
+
+The fix that suggests itself is to stand the camera up until the sight line clears
+the rim, and it is not enough. A die touching the wall needs about 80 degrees of
+elevation before its centre appears and close to 90 before its base does, and at
+90 the camera has no horizontal component left, so its roll is undefined and the
+picture spins. So the camera swings its heading instead, until it is looking in
+from over the middle of the tray. Both the camera and the die are then inside the
+tray's inner rectangle, and that rectangle is convex, so the sight line between
+them cannot pass through a wall at all — at any elevation. The wall is not seen
+over, it is simply no longer in the way, and the shot keeps the lower, more
+three-dimensional angle instead of flattening to a plan view. Elevation is still
+there as a second line of defence, for the cases the swing only partly solves.
+
+How much it swings is how much it needs to: zero when the usual heading already
+sees the dice, full when nothing else would. That measurement is deliberately
+taken at the heading the camera would otherwise drift to rather than the one it is
+currently at, or swinging inward would relieve the very pressure that caused it
+and the camera would wander back out again. The same quantity picks the rate, so a
+shot that needs rescuing is reframed briskly while everything else keeps the slow
+drift.
+
+That last part is what the first attempt got wrong, and the test hid it. The
+reveal is held for a few seconds and then eases back out, but `verify:camera` ran
+the camera for twelve seconds before looking — long enough for a slow orbit to
+reach an angle the player never sees. Every assertion in it was a statement about
+a camera that does not exist. It now runs for exactly `REVEAL_HOLD_SECONDS`,
+imported from the app so the two cannot drift apart, and it checks that the die's
+near-bottom is visible rather than only its centre, which is the difference
+between seeing a die and seeing the top half of one.
 
 Where the close-up puts the dice is measured, not assumed. The app reads the gap
 between the bottom of the flashed total and the top of the controls and hands the

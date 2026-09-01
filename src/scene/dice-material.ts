@@ -29,14 +29,31 @@ export interface FlakeSettings {
   strength: number;
   /** Flakes per world unit; a die is one unit across. */
   density: number;
-  /** How far a flake tilts out of the surface. 1.0 is about 45 degrees. */
+  /**
+   * How far a flake tilts out of the surface. 1.0 is about 45 degrees. Real
+   * paint is milder than this, but real paint is also lit by a whole sky; with
+   * one small room to catch, the flakes need to be pointing in more directions
+   * for any of them to find it.
+   */
   spread: number;
-  /** Flake mirror roughness. Lower = smaller, harder, more separated glints. */
+  /**
+   * Flake mirror roughness. Near zero the flake reflects one small part of the
+   * room, so a few degrees of turn swap what it sees and it snaps on or off;
+   * blur it and it reflects an average of everything and never stops glowing.
+   */
   polish: number;
   /** Fraction of lattice cells that carry a flake at all. */
   coverage: number;
   /** How much each flake takes on the die's own colour. 0 = neutral silver. */
   tint: number;
+  /**
+   * Exponent on each flake's own brightness. 1 leaves the environment as it is
+   * and produces an even speckle; above that, the many flakes catching only the
+   * dim shell fall away and the few that caught a panel blow past 1.0 into the
+   * bloom threshold, which is what turns a field of grey grit into a handful of
+   * points that flare and die as the die turns.
+   */
+  contrast: number;
   /**
    * Lattice cells per pixel at which flakes start and finish fading out. 0.7
    * means "full strength while a flake still spans about a pixel and a half".
@@ -45,12 +62,13 @@ export interface FlakeSettings {
 }
 
 export const DEFAULT_FLAKES: FlakeSettings = {
-  strength: 1.3,
-  density: 60,
-  spread: 0.9,
-  polish: 0.028,
-  coverage: 0.42,
+  strength: 1.7,
+  density: 78,
+  spread: 1.3,
+  polish: 0.01,
+  coverage: 0.75,
   tint: 0.4,
+  contrast: 3,
   fade: [0.7, 1.6],
 };
 
@@ -72,6 +90,7 @@ export function createDiceMaterial(flakeSettings?: Partial<FlakeSettings>): Dice
     uFlakePolish: { value: flakes.polish },
     uFlakeCoverage: { value: flakes.coverage },
     uFlakeTint: { value: flakes.tint },
+    uFlakeContrast: { value: flakes.contrast },
     uFlakeFade: { value: new THREE.Vector2(flakes.fade[0], flakes.fade[1]) },
   };
 
@@ -111,6 +130,7 @@ export function createDiceMaterial(flakeSettings?: Partial<FlakeSettings>): Dice
       uniforms.uFlakePolish.value = flakes.polish;
       uniforms.uFlakeCoverage.value = flakes.coverage;
       uniforms.uFlakeTint.value = flakes.tint;
+      uniforms.uFlakeContrast.value = flakes.contrast;
       uniforms.uFlakeFade.value.set(flakes.fade[0], flakes.fade[1]);
     },
     getFlakes: () => ({ ...flakes }),
@@ -140,6 +160,7 @@ uniform float uFlakeSpread;
 uniform float uFlakePolish;
 uniform float uFlakeCoverage;
 uniform float uFlakeTint;
+uniform float uFlakeContrast;
 uniform vec2 uFlakeFade;
 
 /**
@@ -207,10 +228,23 @@ if (uFlakeStrength > 0.0) {
     if (dot(tilt, tilt) > 1.0) continue;
 
     vec3 flakeNormal = normalize(flakeN + (tilt.x * flakeT + tilt.y * flakeB) * uFlakeSpread);
-    // Flakes differ in how well they are polished, which is what stops the field
-    // reading as one uniform speckle.
-    float polish = uFlakePolish * mix(1.0, 5.0, h.z);
+    // Flakes differ in how well they are polished, but only a little: a flake
+    // given several times the roughness reflects a blur of the whole room and
+    // sits there softly lit whichever way the die turns, which is the opposite
+    // of a glint.
+    float polish = uFlakePolish * mix(1.0, 3.0, h.z);
     vec3 radiance = getIBLRadiance(viewDirView, transformDirection(flakeNormal, viewMatrix), polish);
+    // A mirror either catches a light or it does not, and the environment's own
+    // range is too gentle to say so. Weighting each flake by its own brightness
+    // separates the two: the shell-facing majority drop away and the few that
+    // found a panel keep their level, up past 1.0 where the bloom pass is
+    // waiting for them.
+    //
+    // Normalised against the key panel's radiance so that contrast redistributes
+    // rather than amplifies — a flake already as bright as the key is left alone
+    // whatever the setting, so strength and contrast can be tuned apart.
+    float lum = max(dot(radiance, vec3(0.2126, 0.7152, 0.0722)), 1e-4);
+    radiance *= pow(lum / 3.0, uFlakeContrast - 1.0);
     sparkle += radiance * fade * (layer == 0 ? 1.0 : 0.6);
   }
 

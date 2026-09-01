@@ -47,7 +47,23 @@ const BAND_FIT_LIMIT = 1.4;
 const MAX_REVEAL_PITCH = 1.45;
 
 /** Clearance over the rim, so a die by the wall is not grazing the edge of it. */
-const RIM_CLEARANCE = 0.45;
+const RIM_CLEARANCE = 0.7;
+
+/**
+ * How briskly the reveal reframes when the rim is actually in the way.
+ *
+ * The reveal orbits slowly on purpose, but slowly is a luxury that assumes you
+ * can already see the dice. Standing up and swinging inward to clear a wall is
+ * not a flourish, it is the difference between a shot of the die and a shot of
+ * the rim, and it has to land inside the few seconds the close-up is held.
+ */
+const REVEAL_FRAMING_RATE = 2.8;
+
+/** Wraps an angle difference into [-PI, PI], so an orbit takes the short way. */
+const shortestTurn = (delta: number) => {
+  const wrapped = (delta + Math.PI) % (2 * Math.PI);
+  return (wrapped < 0 ? wrapped + 2 * Math.PI : wrapped) - Math.PI;
+};
 
 /** Frame-rate independent exponential smoothing. */
 const damp = (current: number, target: number, rate: number, dt: number) =>
@@ -174,13 +190,18 @@ export class CameraDirector {
    * The rim stands 2.3 units tall and the camera looks in over it, so at the
    * reveal's usual angle anything within about 1.2 units of the near wall is
    * simply hidden behind it — and dice come to rest against walls constantly.
-   * Standing the camera up until the sight line clears the rim fixes that; close
-   * to a wall it ends up nearly overhead, which is also the best angle for
-   * reading the face that landed up.
+   *
+   * This is the second line of defence. Swinging the heading inward (below) is
+   * what actually rescues a die in a corner, because it takes the wall out of
+   * the sight line altogether rather than trying to see over it. Pitch alone
+   * cannot: a die touching a 2.3-unit wall needs about 80 degrees of elevation
+   * for its centre and close to 90 for its base, and at 90 the camera's roll is
+   * undefined. What this still earns is the cases the swing only partly fixes —
+   * a pool whose centre sits near a wall, or the first moments of the orbit.
    */
-  private pitchToClearRim(target: THREE.Vector3): number {
-    const towardCameraX = Math.sin(this.yaw);
-    const towardCameraZ = Math.cos(this.yaw);
+  private pitchToClearRim(target: THREE.Vector3, yaw: number): number {
+    const towardCameraX = Math.sin(yaw);
+    const towardCameraZ = Math.cos(yaw);
 
     // Horizontal distance from the subject out to the inner face of the wall,
     // along the direction the camera is looking in from.
@@ -199,6 +220,22 @@ export class CameraDirector {
     const rise = TRAY.floorY + TRAY.wallHeight + RIM_CLEARANCE - target.y;
     if (rise <= 0) return 0;
     return Math.atan2(rise, distance);
+  }
+
+  /**
+   * The heading that views the subject from over the middle of the tray.
+   *
+   * The camera sits on the side of the subject the yaw points to, so looking in
+   * from the interior puts every wall behind the subject instead of in front of
+   * it. Both points are then inside the tray's inner rectangle, which is convex,
+   * so the sight line between them cannot pass through a wall at all.
+   *
+   * Null when the subject is already at the middle, where there is no inward
+   * direction and nothing is blocking the view anyway.
+   */
+  private yawOverInterior(target: THREE.Vector3): number | null {
+    if (Math.hypot(target.x, target.z) < 1e-3) return null;
+    return Math.atan2(-target.x, -target.z);
   }
 
   update(dt: number, bounds: THREE.Sphere) {
@@ -262,18 +299,46 @@ export class CameraDirector {
     // Slow drift keeps the frame alive; the reveal adds a touch of orbit for parallax.
     const drift = Math.sin(this.time * 0.11) * 0.1 + Math.sin(this.time * 0.043) * 0.06;
     const revealOrbit = this.mode === 'reveal' ? -0.16 * (1 - Math.exp(-this.revealTime * 0.5)) : 0;
-    const desiredYaw = drift + revealOrbit;
+    const baseYaw = drift + revealOrbit;
+
+    // How badly the rim blocks the shot from the heading we would otherwise
+    // drift to: 0 when the usual angle already sees the subject, 1 when not even
+    // the steepest pitch available would. Deliberately measured at baseYaw and
+    // not at the current yaw, so swinging inward cannot feed back and unwind
+    // the very swing that fixed the shot.
+    let need = 0;
+    let desiredYaw = baseYaw;
+    if (pose.placeSubject) {
+      const required = this.pitchToClearRim(this.desiredTarget, baseYaw);
+      need = THREE.MathUtils.clamp(
+        (required - pose.pitch) / Math.max(MAX_REVEAL_PITCH - pose.pitch, 1e-3),
+        0,
+        1,
+      );
+      const interior = this.yawOverInterior(this.desiredTarget);
+      if (interior !== null && need > 0) {
+        desiredYaw = baseYaw + shortestTurn(interior - baseYaw) * need;
+      }
+    }
+    // Only a shot that needs rescuing gets the brisk reframe; everything else
+    // keeps the slow drift.
+    const orbitRate = THREE.MathUtils.lerp(pose.orbitRate, REVEAL_FRAMING_RATE, need);
 
     this.target.x = damp(this.target.x, this.desiredTarget.x, pose.followRate, dt);
     this.target.y = damp(this.target.y, this.desiredTarget.y, pose.followRate, dt);
     this.target.z = damp(this.target.z, this.desiredTarget.z, pose.followRate, dt);
     this.distance = damp(this.distance, this.desiredDistance, pose.dollyRate, dt);
-    this.yaw = damp(this.yaw, desiredYaw, pose.orbitRate, dt);
+    this.yaw = damp(this.yaw, desiredYaw, orbitRate, dt);
     let desiredPitch = pose.pitch + portraitLift;
     if (pose.placeSubject) {
-      desiredPitch = Math.max(desiredPitch, Math.min(this.pitchToClearRim(this.desiredTarget), MAX_REVEAL_PITCH));
+      // Against the yaw the camera is actually at, so the requirement relaxes as
+      // the swing carries the wall out of the way.
+      desiredPitch = Math.max(
+        desiredPitch,
+        Math.min(this.pitchToClearRim(this.desiredTarget, this.yaw), MAX_REVEAL_PITCH),
+      );
     }
-    this.pitch = damp(this.pitch, desiredPitch, pose.orbitRate, dt);
+    this.pitch = damp(this.pitch, desiredPitch, orbitRate, dt);
     this.fov = damp(this.fov, fov, pose.dollyRate, dt);
     this.compose = damp(this.compose, compose, pose.dollyRate, dt);
 

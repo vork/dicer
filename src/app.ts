@@ -18,7 +18,7 @@ import { resolveRoll, type ResultMode } from './dice/outcome';
  * How long the close-up holds after the dice stop before easing back out. Long
  * enough for the slower dolly to actually arrive before it starts leaving again.
  */
-const REVEAL_HOLD_SECONDS = 3.2;
+export const REVEAL_HOLD_SECONDS = 3.2;
 
 async function loadRapier(): Promise<typeof RAPIER> {
   const module = await import('@dimforge/rapier3d-compat');

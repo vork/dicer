@@ -10,6 +10,7 @@
       import * as THREE from 'three';
       import { CameraDirector } from '/src/camera-director.ts';
       import { TRAY } from '/src/scene/tray.ts';
+      import { REVEAL_HOLD_SECONDS } from '/src/app.ts';
 
       const lines = [];
       const failures = [];
@@ -35,10 +36,16 @@
         ['portrait', 390 / 844],
       ];
 
-      /** Runs the director to a steady state on a fixed bounds sphere. */
-      // Twelve seconds, because the camera moves deliberately slowly: at the
-      // reveal's orbit rate six would still be a few percent short of arrival.
-      function settleCamera(aspect, sphere, band, seconds = 12) {
+      /**
+       * Runs the director for exactly as long as the app holds a reveal.
+       *
+       * This used to run for twelve seconds, which quietly made every assertion
+       * below a statement about a camera the player never sees: the reveal is
+       * held for REVEAL_HOLD_SECONDS and then eases back out, so anything the
+       * camera only reaches at second six has not happened. That is what let a
+       * die in a near corner stay behind the rim while this check passed.
+       */
+      function settleCamera(aspect, sphere, band, seconds = REVEAL_HOLD_SECONDS) {
         const director = new CameraDirector(aspect);
         director.setMode('reveal');
         director.setSubjectBand(band.top, band.bottom);
@@ -145,11 +152,28 @@
           const camera = settleCamera(aspect, sphere, BAND[viewName]);
           camera.updateMatrixWorld(true);
 
+          // Not just the die's centre: the point of the reveal is that you can
+          // see the die, so the near-bottom of it — the first thing a rim eats —
+          // has to be in view too. Standing the camera up can never satisfy
+          // that for a die touching a wall (it wants ~90 degrees of elevation);
+          // only taking the wall out of the sight line can.
+          const toward = new THREE.Vector3()
+            .subVectors(camera.position, centre)
+            .setY(0);
+          if (toward.lengthSq() > 1e-6) toward.normalize();
+          const nearBottom = centre
+            .clone()
+            .addScaledVector(toward, DIE_RADIUS * 0.85)
+            .setY(TRAY.floorY + 0.06);
+
           let blocked = false;
           const step = new THREE.Vector3();
-          for (let t = 0; t <= 1; t += 1 / 400) {
-            step.copy(camera.position).lerp(centre, t);
-            if (insideWall(step)) { blocked = true; break; }
+          for (const point of [centre, nearBottom]) {
+            for (let t = 0; t <= 1; t += 1 / 400) {
+              step.copy(camera.position).lerp(point, t);
+              if (insideWall(step)) { blocked = true; break; }
+            }
+            if (blocked) break;
           }
 
           const elevation = THREE.MathUtils.radToDeg(
