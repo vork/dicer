@@ -1,8 +1,30 @@
+import type { ContactSurface } from './physics/dice-world';
+
 /**
- * Procedural dice audio. No samples to ship: each impact is a short filtered
- * noise burst (the acrylic "clack") layered with a low sine thump (the mass),
- * which lets the timbre track impact strength continuously.
+ * Procedural dice audio. No samples to ship: each impact is one burst of noise
+ * struck through a set of resonators — the sharp top end of the contact itself,
+ * then three high-Q modes ringing where the body of the die would — layered with
+ * a low sine for its mass. Everything is synthesised per impact, so timbre can
+ * follow how hard the hit was, how big the die is, and what it landed on.
  */
+
+/** Inharmonic, the way a small solid object rings. Not a harmonic series. */
+const MODES = [1, 1.63, 2.41];
+
+/**
+ * Acrylic on felt, on leather and on acrylic sound nothing alike, and having
+ * every contact sound the same was most of why the old version was monotonous.
+ * Felt swallows the ring almost entirely; a die struck by another die is the
+ * brightest thing in the tray.
+ */
+const SURFACES: Record<
+  ContactSurface,
+  { root: number; q: number; decay: number; tick: number; ring: number; body: number }
+> = {
+  floor: { root: 3600, q: 6, decay: 0.038, tick: 0.55, ring: 0.70, body: 0.55 },
+  wall: { root: 4200, q: 11, decay: 0.055, tick: 0.70, ring: 0.80, body: 0.40 },
+  dice: { root: 5200, q: 20, decay: 0.09, tick: 0.90, ring: 0.95, body: 0.20 },
+};
 export class DiceAudio {
   private context: AudioContext | null = null;
   private master: GainNode | null = null;
@@ -14,7 +36,7 @@ export class DiceAudio {
   setEnabled(enabled: boolean) {
     this.enabled = enabled;
     if (this.master && this.context) {
-      this.master.gain.setTargetAtTime(enabled ? 0.9 : 0, this.context.currentTime, 0.02);
+      this.master.gain.setTargetAtTime(enabled ? 0.8 : 0, this.context.currentTime, 0.02);
     }
   }
 
@@ -32,16 +54,20 @@ export class DiceAudio {
     // Dice make a lot of small taps and a few hard cracks. Pushing the quiet end
     // up far enough to hear leaves the loud end clipping when several land at
     // once, so the bus runs through a limiter and the levels can sit high.
+    // Deliberately not a fast limiter. At a 3ms attack it was closing over the
+    // strike itself — the two or three milliseconds of top end that make a die
+    // sound hard — and levelling exactly what should stand out. Opening more
+    // slowly lets the transient through and still catches the sustain behind it.
     const limiter = context.createDynamicsCompressor();
-    limiter.threshold.value = -12;
-    limiter.knee.value = 8;
-    limiter.ratio.value = 8;
-    limiter.attack.value = 0.003;
-    limiter.release.value = 0.15;
+    limiter.threshold.value = -14;
+    limiter.knee.value = 10;
+    limiter.ratio.value = 5;
+    limiter.attack.value = 0.006;
+    limiter.release.value = 0.12;
     limiter.connect(context.destination);
 
     const master = context.createGain();
-    master.gain.value = this.enabled ? 0.9 : 0;
+    master.gain.value = this.enabled ? 0.8 : 0;
     master.connect(limiter);
 
     // Two seconds of white noise, reused for every click.
@@ -57,8 +83,10 @@ export class DiceAudio {
   /**
    * @param strength 0..1
    * @param pan -1..1, where the die hit across the tray
+   * @param surface what it hit
+   * @param radius the die's bounding radius, in world units
    */
-  impact(strength: number, pan = 0) {
+  impact(strength: number, pan = 0, surface: ContactSurface = 'floor', radius = 0.5) {
     if (!this.enabled) return;
     if (!this.context) this.init();
     const context = this.context;
@@ -77,38 +105,73 @@ export class DiceAudio {
     // crack, so a linear mapping left the median impact near inaudible. The
     // curve lifts the quiet end without flattening the loud end.
     const level = Math.pow(Math.max(0.06, Math.min(1, strength)), 0.55);
+    const voice = SURFACES[surface];
+    const jitter = (amount: number) => 1 + (Math.random() * 2 - 1) * amount;
 
-    // Click: band-passed noise, brighter and longer the harder the hit.
+    const placement = context.createStereoPanner();
+    placement.pan.value = Math.max(-1, Math.min(1, pan)) * 0.6;
+    placement.connect(master);
+
+    // One burst of noise excites the whole thing, the way one strike does.
     const source = context.createBufferSource();
     source.buffer = noise;
     source.playbackRate.value = 0.85 + Math.random() * 0.3;
-    const band = context.createBiquadFilter();
-    band.type = 'bandpass';
-    band.frequency.value = 1500 + level * 2600 + Math.random() * 500;
-    band.Q.value = 1.1;
-    const clickGain = context.createGain();
-    const clickDuration = 0.035 + level * 0.05;
-    clickGain.gain.setValueAtTime(0, now);
-    clickGain.gain.linearRampToValueAtTime(0.8 * level, now + 0.003);
-    clickGain.gain.exponentialRampToValueAtTime(0.0001, now + clickDuration);
-    const placement = context.createStereoPanner();
-    placement.pan.value = Math.max(-1, Math.min(1, pan)) * 0.6;
-    source.connect(band).connect(clickGain).connect(placement).connect(master);
-    source.start(now, Math.random() * 1.5, clickDuration + 0.02);
+    const ring = voice.decay * jitter(0.25) * (0.7 + level * 0.5);
+    source.start(now, Math.random() * 1.5, ring + 0.05);
 
-    // Body: a short low sine, only on hits with real force behind them.
+    // The strike itself: a few milliseconds of top end, and the reason the old
+    // version sounded muffled. A bandpass at 1.5-4kHz with a Q of one has
+    // essentially nothing above 8kHz, and a three-millisecond attack smeared
+    // what little there was. Real acrylic clacking is mostly this.
+    const edge = context.createBiquadFilter();
+    edge.type = 'highpass';
+    edge.frequency.value = 2600 * jitter(0.4);
+    const tick = context.createGain();
+    tick.gain.setValueAtTime(0, now);
+    tick.gain.linearRampToValueAtTime(voice.tick * level, now + 0.0008);
+    tick.gain.exponentialRampToValueAtTime(0.0001, now + 0.006 * jitter(0.3));
+    source.connect(edge).connect(tick).connect(placement);
+
+    // And the body ringing. A small hard object has a handful of sharp modes
+    // rather than one broad band, and it is the modes that carry the character:
+    // where the old click randomised only its centre frequency and so came out
+    // the same every time, three high-Q resonators on inharmonic ratios give
+    // each impact its own pitch and colour. A big die rings lower.
+    const root = (voice.root * 0.5) / Math.max(radius, 0.2) * jitter(0.28);
+    // Two modes or three, chosen per impact. Dropping one changes the timbre far
+    // more than nudging a frequency does, and it is the cheapest source of real
+    // variety here — no two dice in a set ring quite alike either.
+    const modes = Math.random() < 0.35 ? MODES.slice(0, 2) : MODES;
+    for (const ratio of modes) {
+      const mode = context.createBiquadFilter();
+      mode.type = 'bandpass';
+      mode.frequency.value = Math.min(root * ratio * jitter(0.22), 17000);
+      mode.Q.value = voice.q * jitter(0.4);
+      const decay = context.createGain();
+      const loudness =
+        voice.ring * level * (ratio === 1 ? 1 : 0.55 / ratio) * (0.55 + Math.random() * 0.6);
+      decay.gain.setValueAtTime(0, now);
+      decay.gain.linearRampToValueAtTime(loudness, now + 0.001);
+      decay.gain.exponentialRampToValueAtTime(0.0001, now + ring * jitter(0.35));
+      source.connect(mode).connect(decay).connect(placement);
+    }
+
+    // Body: a short low sine, only on hits with real force behind them. Kept well
+    // under the strike, because a sine at this level carries far more energy than
+    // a few milliseconds of top end and will bury it given the chance — measured
+    // at zero percent of a floor impact's energy above 6kHz before this came down.
     if (level > 0.3) {
       const thump = context.createOscillator();
       thump.type = 'sine';
-      thump.frequency.setValueAtTime(150 + Math.random() * 40, now);
-      thump.frequency.exponentialRampToValueAtTime(58, now + 0.1);
+      thump.frequency.setValueAtTime((150 + Math.random() * 40) * voice.body, now);
+      thump.frequency.exponentialRampToValueAtTime(58 * voice.body, now + 0.1);
       const thumpGain = context.createGain();
       thumpGain.gain.setValueAtTime(0, now);
-      thumpGain.gain.linearRampToValueAtTime(0.55 * level, now + 0.006);
-      thumpGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.13);
+      thumpGain.gain.linearRampToValueAtTime(0.38 * level * voice.body, now + 0.006);
+      thumpGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.10 * jitter(0.25));
       thump.connect(thumpGain).connect(master);
       thump.start(now);
-      thump.stop(now + 0.15);
+      thump.stop(now + 0.16);
     }
   }
 

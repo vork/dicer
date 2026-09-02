@@ -60,10 +60,16 @@ export interface Die {
   previousSpeed: number;
 }
 
+/** What a die hit. Acrylic on felt, on leather and on acrylic sound nothing alike. */
+export type ContactSurface = 'floor' | 'wall' | 'dice';
+
 export interface Impact {
   strength: number;
   /** Sideways position across the tray, -1..1, for stereo placement. */
   pan: number;
+  surface: ContactSurface;
+  /** The die's bounding radius, so a big die can ring lower than a small one. */
+  radius: number;
 }
 
 export interface StepResult {
@@ -197,6 +203,32 @@ export class DiceWorld {
     // Rapier renamed this between versions; accept either.
     const raw = hit as unknown as { toi?: number; timeOfImpact?: number };
     return raw.timeOfImpact ?? raw.toi ?? null;
+  }
+
+  /**
+   * A guess at what the die just hit, from where it is rather than from the
+   * contact manifold — the deceleration test that spots an impact does not know
+   * what caused it, and a good guess is worth more here than an exact answer.
+   * Neighbours first: a die knocking another one is the rarest of the three and
+   * the most distinctive, so it should not be lost to a wall it happens to be
+   * near.
+   */
+  private contactSurface(die: Die, radius: number): ContactSurface {
+    const t = die.body.translation();
+    for (const other of this.dice) {
+      if (other === die) continue;
+      const o = other.body.translation();
+      const reach = radius + this.assets.info[other.type].radius + 0.12;
+      const dx = t.x - o.x;
+      const dy = t.y - o.y;
+      const dz = t.z - o.z;
+      if (dx * dx + dy * dy + dz * dz < reach * reach) return 'dice';
+    }
+    const gap = Math.min(
+      PLAY.halfWidth - Math.abs(t.x) - radius,
+      PLAY.halfDepth - Math.abs(t.z) - radius,
+    );
+    return gap < 0.14 ? 'wall' : 'floor';
   }
 
   get isRolling() {
@@ -386,9 +418,12 @@ export class DiceWorld {
       const deceleration = die.previousSpeed - speed;
       if (deceleration > 3.5) {
         const t = die.body.translation();
+        const radius = this.assets.info[die.type].radius;
         impacts.push({
           strength: THREE.MathUtils.clamp(deceleration / 34, 0, 1),
           pan: THREE.MathUtils.clamp(t.x / (TRAY.innerWidth / 2), -1, 1),
+          surface: this.contactSurface(die, radius),
+          radius,
         });
       }
       die.previousSpeed = speed;

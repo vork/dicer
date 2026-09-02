@@ -393,6 +393,47 @@ without that the first die in the pool would always leave from the same place
 relative to the heading, so the pool's slots could not be independent by
 construction, only by measurement.
 
+## The sound
+
+Every impact is synthesised: one burst of noise struck through a set of
+resonators, layered with a low sine for the die's mass. Nothing is sampled.
+
+It used to be one bandpass filter at 1.5-4kHz with a Q of about one, and that is
+audible as two separate faults. A Q-1 bandpass has essentially nothing above 8kHz,
+so 0.4% of the energy sat above 6kHz — the sound was all body and no strike, which
+is what "muffled" means. And because the filter shape was the same every time, two
+impacts of the same kind measured 0.99 alike: the only things that varied were the
+centre frequency by a few hundred hertz and where the noise buffer was read from,
+neither of which changes the timbre.
+
+Now the noise excites a sharp top-end tick — the contact itself, under a
+millisecond of attack, which is most of what makes a die sound hard — and two or
+three high-Q modes on inharmonic ratios, ringing where the body of the die would.
+Each impact picks its own root, ratios, Q values, mode count and decay, so no two
+are alike, and a big die rings lower than a small one.
+
+Contacts are also told apart. Acrylic on felt, on leather and on acrylic sound
+nothing alike, so the physics guesses which happened — neighbours first, since a
+die knocking another die is the rarest and most distinctive of the three — and
+each gets its own voice. Felt swallows the ring; a die struck by another die is
+the brightest thing in the tray. Measured, that is 16% of the energy above 6kHz on
+the floor against 42% between dice, where before all three sat at 0.3%.
+
+Two smaller things were burying the strike. The low sine carries far more energy
+than a few milliseconds of top end and will swamp it given the chance — floor
+impacts measured *zero* percent above 6kHz until it came down. And the bus limiter
+attacked in 3ms, which is to say it closed over the transient and levelled the one
+part that was supposed to stand out; it opens more slowly now and catches the
+sustain behind it instead.
+
+`npm run verify:sound` measures all of this rather than describing it: it renders
+impacts through the real class into an `OfflineAudioContext` and reports the share
+of energy above 6kHz and how alike two impacts of the same kind are. Its own first
+version was wrong in a way worth recording — plain cosine similarity between two
+log-magnitude spectra sits above 0.99 no matter how different the sounds, because
+it is measuring the offset they share rather than their shape. Centring each
+spectrum first is what makes the number mean anything.
+
 ## Tooling
 
 | command | what it does |
@@ -409,6 +450,7 @@ construction, only by measurement.
 | `npm run verify:physics` | settle, containment and distribution over many rolls |
 | `npm run verify:pairs` | two dice in one throw land independently of each other |
 | `npm run verify:audio` | impacts make sound, and the toggle silences and restores it |
+| `npm run verify:sound` | the impacts are bright, and no two are alike |
 | `npm run verify:flakes` | the sparkle does not jump as the camera closes in |
 | `npm run verify:build` | the built site runs from a sub-path, with no 404s |
 | `npm run verify:pwa` | the installed app boots and rolls with the network cut |
