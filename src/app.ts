@@ -52,6 +52,12 @@ export class App {
   private revealing = false;
   /** Test hook: holds the close-up open so a headless run can measure it. */
   private revealHeld = false;
+  /**
+   * Stops the camera dead. Only a test uses this: the camera drifts and orbits
+   * continuously, so it is never actually still, and anything measuring what
+   * changed between two frames is otherwise measuring the camera.
+   */
+  private cameraFrozen = false;
   /** Which dice the reveal closes in on; empty means all of them. */
   private revealFocus: number[] = [];
   private running = false;
@@ -215,7 +221,7 @@ export class App {
     // Under highest/lowest the shot tightens onto the dice that won; under sum
     // every die counts, so every die stays in frame.
     this.diceWorld.getBounds(this.bounds, this.revealing ? this.revealFocus : undefined);
-    this.director.update(delta, this.bounds);
+    if (!this.cameraFrozen) this.director.update(delta, this.bounds);
     this.postFx.setFocus(this.director.revealProgress);
     this.postFx.render(delta);
   };
@@ -251,6 +257,11 @@ export class App {
       getFlakes: () => this.dice.getFlakes(),
       setBloom: (strength: number, radius: number, threshold: number) =>
         this.postFx.setBloom(strength, radius, threshold),
+      setGrain: (amount: number) => this.postFx.setGrain(amount),
+      freezeCamera: (frozen: boolean) => {
+        this.cameraFrozen = frozen;
+      },
+      wallDistance: (y: number, dx: number, dz: number) => this.diceWorld.wallDistance(y, dx, dz),
       roll: (x: number, z: number, power: number) => this.throwDice(new THREE.Vector2(x, z), power),
       setPool: (pool: DieType[]) => this.hud.setPool(pool),
       setSet: (id: string) => this.selectSet(id),

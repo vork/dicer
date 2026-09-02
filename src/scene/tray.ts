@@ -11,7 +11,32 @@ export const TRAY = {
   innerDepth: 8.5,
   wallHeight: 2.3,
   wallThickness: 0.85,
+  /** Corner radius of the opening. */
+  innerFillet: 0.7,
+  /**
+   * The extrude bevel on the wall ring. It rounds the top and bottom edges, but
+   * it also pulls the whole inner face in by this much, so the leather you can
+   * see is not where `innerWidth` says it is — see PLAY.
+   */
+  wallBevel: 0.16,
   floorY: 0,
+};
+
+/**
+ * Where a die may actually come to rest: the surface a player can see, not the
+ * nominal opening.
+ *
+ * ExtrudeGeometry's bevel insets the hole along its whole height, so the visible
+ * leather stands `wallBevel` proud of `innerWidth / 2`. Colliders built on the
+ * nominal figure let every die resting against a wall sink that far into it, and
+ * more at a corner, where the visible fillet cuts the sharp corner off as well.
+ * Both were measured by raycasting the built geometry rather than derived from
+ * the extrude options, and `npm run verify:tray` keeps them honest.
+ */
+export const PLAY = {
+  halfWidth: TRAY.innerWidth / 2 - TRAY.wallBevel,
+  halfDepth: TRAY.innerDepth / 2 - TRAY.wallBevel,
+  fillet: TRAY.innerFillet - TRAY.wallBevel,
 };
 
 function roundedRect(width: number, depth: number, radius: number): THREE.Shape {
@@ -80,7 +105,7 @@ export function createTray(): Tray {
     envMapIntensity: 0.35,
   });
 
-  const floorShape = roundedRect(inner.w, inner.d, 0.7);
+  const floorShape = roundedRect(inner.w, inner.d, TRAY.innerFillet);
   const floor = new THREE.Mesh(new THREE.ShapeGeometry(floorShape, 24), floorMaterial);
   floor.rotation.x = -Math.PI / 2;
   floor.position.y = TRAY.floorY;
@@ -89,7 +114,7 @@ export function createTray(): Tray {
 
   // --- wall ring ---------------------------------------------------------
   const wallShape = roundedRect(outer.w, outer.d, 1.3);
-  wallShape.holes.push(roundedRect(inner.w, inner.d, 0.7));
+  wallShape.holes.push(roundedRect(inner.w, inner.d, TRAY.innerFillet));
 
   const wallGeometry = extrudeUpright(
     wallShape,
@@ -97,7 +122,7 @@ export function createTray(): Tray {
       depth: TRAY.wallHeight,
       bevelEnabled: true,
       bevelThickness: 0.18,
-      bevelSize: 0.16,
+      bevelSize: TRAY.wallBevel,
       bevelSegments: 4,
       curveSegments: 24,
     },
@@ -125,7 +150,7 @@ export function createTray(): Tray {
   group.add(walls);
 
   // --- thin gold bead along the inner lip --------------------------------
-  const lipShape = roundedRect(inner.w + 0.06, inner.d + 0.06, 0.72);
+  const lipShape = roundedRect(inner.w + 0.06, inner.d + 0.06, TRAY.innerFillet + 0.02);
   const lip = new THREE.Mesh(
     new THREE.TubeGeometry(shapeToCurve(lipShape), 240, 0.035, 8, true),
     new THREE.MeshPhysicalMaterial({

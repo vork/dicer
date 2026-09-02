@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { TRAY } from './scene/tray';
+import { TRAY, PLAY } from './scene/tray';
 
 export type CameraMode = 'idle' | 'rolling' | 'reveal';
 
@@ -212,8 +212,8 @@ export class CameraDirector {
     const distance = Math.max(
       0,
       Math.min(
-        reach(target.x, TRAY.innerWidth / 2, towardCameraX),
-        reach(target.z, TRAY.innerDepth / 2, towardCameraZ),
+        reach(target.x, PLAY.halfWidth, towardCameraX),
+        reach(target.z, PLAY.halfDepth, towardCameraZ),
       ),
     );
 
@@ -249,8 +249,8 @@ export class CameraDirector {
       // A safety net against a stray value, not a restriction: the look-at has to
       // be able to reach the tray walls, or a die resting in a corner never gets
       // centred and the reveal appears not to pan at all.
-      this.desiredTarget.x = THREE.MathUtils.clamp(this.desiredTarget.x, -TRAY.innerWidth / 2, TRAY.innerWidth / 2);
-      this.desiredTarget.z = THREE.MathUtils.clamp(this.desiredTarget.z, -TRAY.innerDepth / 2, TRAY.innerDepth / 2);
+      this.desiredTarget.x = THREE.MathUtils.clamp(this.desiredTarget.x, -PLAY.halfWidth, PLAY.halfWidth);
+      this.desiredTarget.z = THREE.MathUtils.clamp(this.desiredTarget.z, -PLAY.halfDepth, PLAY.halfDepth);
       this.desiredTarget.y = THREE.MathUtils.clamp(this.desiredTarget.y, TRAY.floorY + 0.3, TRAY.floorY + 4);
     }
 

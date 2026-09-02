@@ -90,6 +90,12 @@ export interface PostFx {
   setFocus(value: number): void;
   /** Exposed for tuning from the headless shooter. */
   setBloom(strength: number, radius: number, threshold: number): void;
+  /**
+   * Film grain amount. Exposed so a test can silence it: the grain is reseeded
+   * every frame, so any measurement of what changed between two frames is
+   * otherwise measuring the grain and nothing else.
+   */
+  setGrain(amount: number): void;
   dispose(): void;
 }
 
@@ -139,6 +145,9 @@ export function createPostFx(
       bloom.strength = strength;
       bloom.radius = radius;
       bloom.threshold = threshold;
+    },
+    setGrain(amount) {
+      grade.uniforms.uGrain.value = amount;
     },
     dispose() {
       bloom.dispose();

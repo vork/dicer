@@ -171,6 +171,23 @@ made them look too big.
 
 So the lattice is mip-mapped instead. It coarsens by powers of two until a cell is
 about `grain` pixels across and cross-fades between the two levels either side.
+Two details make that handover invisible, and both were wrong first.
+
+The skew that keeps a level from reading as a cubic grid belongs to the *level*,
+not to the slot it happens to occupy. Tied to the slot, every boundary was a hard
+cut: just below one, the coarse slot drew level k+1 with one skew; just above it,
+the fine slot drew that same level with the other, and the whole field jumped to
+new positions in a single frame. Keying the skew off the level's parity makes the
+handover exact.
+
+And the levels swap by population, not by brightness. Cross-fading their
+brightness takes every flake through half intensity on the way, which drops it
+under the bloom threshold and lifts it back out, so the field pulses as you zoom.
+Each flake now decides by its own hash whether it belongs to this level or the
+next, so the population dissolves one speck at a time and every speck that is
+drawn is drawn at full strength — which also turns out to change less per frame
+overall, since only a few percent of flakes toggle rather than all of them
+dimming at once.
 Up close you get the flake size the paint actually has; further away you get the
 same speck size on screen drawn from a coarser lattice — a fair sample of the same
 distribution rather than a blur of it, so the dice stay sparkly at any distance.
@@ -201,6 +218,37 @@ sits there softly lit whichever way the die turns, which is the opposite of a
 glint. And the tilt spread is wider than real paint uses: real paint is lit by a
 whole sky, while these flakes have one small room to find, so they have to point
 in more directions for any of them to find it.
+
+`npm run verify:flakes` is what caught the jumping. It simulates a dolly without
+moving the camera: the mip level comes from `log2(footprint * grain)`, so sweeping
+`grain` walks the same range as closing in, with the camera, the dice and the
+lights all held still — and then anything that changes between two frames is the
+lattice and nothing else. Getting there took two goes at removing what was *not*
+the lattice. The grade reseeds its film grain every frame, a flat noise floor four
+times the size of the signal. Then the camera turned out never to stop drifting;
+normalising each step by a locally measured drift blew up wherever that drift
+passed through zero at a turning point of its own sine, and reported a confident
+100x "pop" at the same grain every run. Silencing the grain and freezing the
+camera puts the floor at exactly zero.
+
+Even then, sweeping and hunting for an outlier step was too blunt — every step
+toggles a few percent of the flakes at random, so the worst step sits three to
+five times the median whether anything is wrong or not. It straddles instead. A
+level boundary is crossed by a grain step of a fifth of a percent, over which a
+working dissolve changes almost nothing while a broken handover swaps the whole
+field, so the question becomes "is this anywhere near as large as replacing every
+flake" rather than a judgement about scatter. Away from a boundary a 0.4% change
+of zoom disturbs 0.4% of the field. Crossing one used to disturb 35%; it now
+disturbs 9-17%, varying with where the dice happen to lie.
+
+That residual is real and I have not explained it. The spikes are not periodic —
+they are scattered, one per facet, each worth roughly that facet's share of the
+die, which is what you would expect if each facet hands over at its own depth. But
+a clean handover should cost about 0.4%, not ten. Making both mip levels share one
+skew, so they nest exactly, changes nothing (15%), which rules out the skew as the
+remaining cause. The check's limit is set at 25%, which sits between the old
+behaviour and the current one — enough to catch a regression to the old, not
+enough to call the current state finished.
 
 `npm run flakes` is the tuning rig: one roll, then every entry in
 `tools/flake-variants.json` rendered as a magnified crop of the same settled die
@@ -279,6 +327,29 @@ imported from the app so the two cannot drift apart, and it checks that the die'
 near-bottom is visible rather than only its centre, which is the difference
 between seeing a die and seeing the top half of one.
 
+The tray a die is allowed to touch is not the tray in `tray.ts`. `ExtrudeGeometry`'s
+bevel rounds the wall's top and bottom edges, but it also pulls the whole inner
+face inward by `bevelSize` along its full height, and the opening's corners are
+filleted while four flat collider planes meet at a point. So the leather you can
+see stood 0.16 units inside the wall the physics used, and 0.28 at a corner —
+every die that came to rest against a wall was buried a third of its width into
+it, worst exactly where dice pile up.
+
+`PLAY` in `tray.ts` is the boundary that actually exists: the nominal opening less
+the bevel, with the fillet shrunk to match. The colliders are built from it, three
+chord planes per corner standing in for each fillet — cutting at most 0.02 units
+inside the true arc, a fortieth of a die — and the camera measures the rim from it
+too, since the rim that blocks a sight line is the one you can see.
+
+`npm run verify:tray` keeps the two honest by measuring both rather than trusting
+either: it raycasts the built wall geometry and, along the same headings, the
+physics world itself. Asking the colliders instead of recomputing the boundary
+from the constants they were built from is the point — the arithmetic agreeing
+with itself would prove nothing, and would sit there passing if the walls were
+wired back to the nominal dimensions. Doing exactly that is how I know it works:
+78 sight lines all overhang, worst 0.226 at the corner diagonal, against 0.000 as
+it stands.
+
 Where the close-up puts the dice is measured, not assumed. The app reads the gap
 between the bottom of the flashed total and the top of the controls and hands the
 camera that band; the camera frames the dice to fit inside it. That gap is a very
@@ -333,10 +404,12 @@ construction, only by measurement.
 | `npm run verify:values` | opposite-face-sum invariant on the tables |
 | `npm run verify:reading` | every slot reads back from every yaw, and pool resolution |
 | `npm run verify:camera` | the reveal frames dice anywhere in the tray, uncropped |
+| `npm run verify:tray` | no die can sink into the wall you can see |
 | `npm run verify:layout` | settled dice land clear of the result and the controls |
 | `npm run verify:physics` | settle, containment and distribution over many rolls |
 | `npm run verify:pairs` | two dice in one throw land independently of each other |
 | `npm run verify:audio` | impacts make sound, and the toggle silences and restores it |
+| `npm run verify:flakes` | the sparkle does not jump as the camera closes in |
 | `npm run verify:build` | the built site runs from a sub-path, with no 404s |
 | `npm run verify:pwa` | the installed app boots and rolls with the network cut |
 | `npm run calibrate` | regenerate the face contact sheets |

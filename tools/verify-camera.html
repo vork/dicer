@@ -9,7 +9,7 @@
     <script type="module">
       import * as THREE from 'three';
       import { CameraDirector } from '/src/camera-director.ts';
-      import { TRAY } from '/src/scene/tray.ts';
+      import { TRAY, PLAY } from '/src/scene/tray.ts';
       import { REVEAL_HOLD_SECONDS } from '/src/app.ts';
 
       const lines = [];
@@ -18,8 +18,8 @@
       // A d20 is the biggest die; this is roughly its bounding radius.
       const DIE_RADIUS = 0.52;
       // Where a die can actually come to rest, hard against a wall.
-      const maxX = TRAY.innerWidth / 2 - DIE_RADIUS;
-      const maxZ = TRAY.innerDepth / 2 - DIE_RADIUS;
+      const maxX = PLAY.halfWidth - DIE_RADIUS;
+      const maxZ = PLAY.halfDepth - DIE_RADIUS;
 
       const spots = [
         ['centre', 0, 0],
@@ -138,8 +138,10 @@
       // the camera to the die and check it never passes through that solid.
       const outerHalfW = TRAY.innerWidth / 2 + TRAY.wallThickness;
       const outerHalfD = TRAY.innerDepth / 2 + TRAY.wallThickness;
+      // The visible leather, not the nominal opening — the bevel puts the face a
+      // little further in, which is where a sight line actually gets blocked.
       const insideWall = (p) =>
-        (Math.abs(p.x) > TRAY.innerWidth / 2 || Math.abs(p.z) > TRAY.innerDepth / 2) &&
+        (Math.abs(p.x) > PLAY.halfWidth || Math.abs(p.z) > PLAY.halfDepth) &&
         Math.abs(p.x) <= outerHalfW &&
         Math.abs(p.z) <= outerHalfD &&
         p.y >= TRAY.floorY &&

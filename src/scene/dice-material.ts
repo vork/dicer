@@ -221,21 +221,34 @@ if (uFlakeStrength > 0.0) {
   float coarse = floor(lod);
   float blend = lod - coarse;
 
-  // The two levels get different skews so neither reads as a cubic grid sliced
-  // flat by a die face, which is what a single axis-aligned lattice looks like.
-  mat3 skewA = mat3(0.80, 0.42, -0.43, -0.53, 0.83, -0.18, 0.28, 0.36, 0.89);
-  mat3 skewB = mat3(0.36, -0.80, 0.48, 0.87, 0.47, 0.13, -0.33, 0.37, 0.87);
-  vec3 pA = skewA * base * exp2(-coarse);
-  vec3 pB = skewB * base * exp2(-coarse - 1.0);
+  // Adjacent levels get different skews, so neither reads as a cubic grid sliced
+  // flat by a die face and the cross-fade is a dissolve rather than flakes
+  // visibly swelling into their own parents.
+  //
+  // The skew belongs to the level, not to the slot. Tying it to the slot put a
+  // hard cut at every boundary: just below one, the coarse slot drew level k+1
+  // with one skew; just above it, the fine slot drew that same level with the
+  // other, so the whole field jumped to new positions in a single frame. Keying
+  // it off the level's parity makes the handover exact.
+  mat3 skewEven = mat3(0.80, 0.42, -0.43, -0.53, 0.83, -0.18, 0.28, 0.36, 0.89);
+  mat3 skewOdd = mat3(0.36, -0.80, 0.48, 0.87, 0.47, 0.13, -0.33, 0.37, 0.87);
+  bool evenLevel = mod(coarse, 2.0) < 0.5;
+  vec3 pA = (evenLevel ? skewEven : skewOdd) * base * exp2(-coarse);
+  vec3 pB = (evenLevel ? skewOdd : skewEven) * base * exp2(-coarse - 1.0);
 
   vec3 sparkle = vec3(0.0);
   for (int layer = 0; layer < 2; layer++) {
-    float fade = layer == 0 ? 1.0 - blend : blend;
-    if (fade <= 0.0) continue;
-
     vec3 cell = floor(layer == 0 ? pA : pB);
     vec4 h = flakeHash(cell);
     if (h.w > uFlakeCoverage) continue;
+
+    // Stochastic LOD. Cross-fading the two levels by brightness takes every
+    // flake through half intensity on the way, which drops it under the bloom
+    // threshold and lifts it back out — the field pulses as you zoom. Keeping or
+    // dropping whole flakes by hash dissolves the population instead, one speck
+    // at a time, and every speck that is drawn is drawn at full strength.
+    float dither = fract(h.w * 31.7);
+    if (layer == 0 ? dither < blend : dither >= blend) continue;
 
     // Tilt in the tangent plane, rejected to a disc: a square of tilts leaves a
     // faint cross-hatch in the highlight distribution.
@@ -260,7 +273,7 @@ if (uFlakeStrength > 0.0) {
     // whatever the setting, so strength and contrast can be tuned apart.
     float lum = max(dot(radiance, vec3(0.2126, 0.7152, 0.0722)), 1e-4);
     radiance *= pow(lum / 3.0, uFlakeContrast - 1.0);
-    sparkle += radiance * fade;
+    sparkle += radiance;
   }
 
   // Seen through a clear coat, so flakes fire harder at glancing angles.

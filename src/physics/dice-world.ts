@@ -3,7 +3,7 @@ import type RAPIER from '@dimforge/rapier3d-compat';
 import type { DiceAssets } from '../assets';
 import { type DieType } from '../dice/values';
 import { readDie, readDirectionsFor } from '../dice/read';
-import { TRAY } from '../scene/tray';
+import { TRAY, PLAY } from '../scene/tray';
 
 /**
  * One world unit is ~20mm (the scale the asset pipeline normalised the d20 to), so
@@ -102,8 +102,11 @@ export class DiceWorld {
 
   private buildTray() {
     const { rapier, world } = this;
-    const halfWidth = TRAY.innerWidth / 2;
-    const halfDepth = TRAY.innerDepth / 2;
+    // The play area, not the nominal opening: the wall's extrude bevel pulls the
+    // visible leather inward, and a collider on the nominal figure buries every
+    // die that rests against a wall.
+    const halfWidth = PLAY.halfWidth;
+    const halfDepth = PLAY.halfDepth;
     // Taller than the visible rim: the extra height is invisible and almost never
     // touched, but it stops a hard throw from launching a die out of the world.
     const wallHalfHeight = TRAY.wallHeight * 1.6;
@@ -134,6 +137,41 @@ export class DiceWorld {
     wall(0, halfDepth + thickness, halfWidth + thickness * 2, thickness);
     wall(0, -halfDepth - thickness, halfWidth + thickness * 2, thickness);
 
+    // The corners are filleted, so four flat planes meeting at a point let a die
+    // sit in a corner the tray does not have — the worst of the clipping, since
+    // it is exactly where dice pile up. The arc is approximated by chords: three
+    // per corner cuts at most 0.02 units inside the true fillet, which is a
+    // fortieth of a die and invisible, while a single chord would leave a
+    // noticeable flat.
+    const CORNER_SEGMENTS = 3;
+    const step = Math.PI / 2 / CORNER_SEGMENTS;
+    // Distance from the fillet's centre to each chord. Every chord is a secant,
+    // so it errs into the tray rather than out of it, which is the safe side.
+    const reach = PLAY.fillet * Math.cos(step / 2);
+    for (const sx of [-1, 1]) {
+      for (const sz of [-1, 1]) {
+        const cx = sx * (halfWidth - PLAY.fillet);
+        const cz = sz * (halfDepth - PLAY.fillet);
+        for (let i = 0; i < CORNER_SEGMENTS; i++) {
+          const angle = (i + 0.5) * step;
+          // Outward normal of this chord, in the corner's own quadrant.
+          const nx = sx * Math.cos(angle);
+          const nz = sz * Math.sin(angle);
+          // Rotating a box about Y by `spin` sends its local +x to (cos, 0, -sin),
+          // so this is the turn that points its face along the normal.
+          const spin = Math.atan2(-nz, nx);
+          world.createCollider(
+            rapier.ColliderDesc.cuboid(thickness, wallHalfHeight, PLAY.fillet)
+              .setTranslation(cx + nx * (reach + thickness), TRAY.floorY + wallHalfHeight, cz + nz * (reach + thickness))
+              .setRotation({ x: 0, y: Math.sin(spin / 2), z: 0, w: Math.cos(spin / 2) })
+              .setRestitution(0.36)
+              .setFriction(0.45),
+            staticBody,
+          );
+        }
+      }
+    }
+
     // Ceiling, purely as a backstop for an extreme throw.
     world.createCollider(
       rapier.ColliderDesc.cuboid(halfWidth + 2, thickness, halfDepth + 2)
@@ -142,6 +180,23 @@ export class DiceWorld {
         .setFriction(0.7),
       staticBody,
     );
+  }
+
+  /**
+   * Distance from a point inside the tray to the first collider along a heading.
+   * Only a test uses this: it is the one way to ask where the walls really are
+   * rather than where the constants say they should be.
+   */
+  wallDistance(y: number, dx: number, dz: number): number | null {
+    const length = Math.hypot(dx, dz) || 1;
+    const ray = new this.rapier.Ray({ x: 0, y, z: 0 }, { x: dx / length, y: 0, z: dz / length });
+    // Dice excluded: the pool rests near the middle of the tray, so a ray cast
+    // from there starts inside one and reports a distance of zero.
+    const hit = this.world.castRay(ray, 40, true, this.rapier.QueryFilterFlags.EXCLUDE_DYNAMIC);
+    if (!hit) return null;
+    // Rapier renamed this between versions; accept either.
+    const raw = hit as unknown as { toi?: number; timeOfImpact?: number };
+    return raw.timeOfImpact ?? raw.toi ?? null;
   }
 
   get isRolling() {
