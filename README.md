@@ -265,6 +265,16 @@ blob and took the numerals with them. It now starts above 1.0 at roughly half th
 strength and a shorter radius, which confines it to genuinely blown highlights
 and leaves the flakes as the thing catching the light.
 
+The flakes then needed their own limit. Bloom spreads energy rather than
+intensity, so past a point a brighter flake stops reading as a sharper point and
+starts reading as a soft blob — and the contrast curve deliberately sends the
+best-placed ones a long way past the threshold. A soft ceiling rolls off the very
+top, applied to the peak channel so the roll-off cannot drain the colour out of
+exactly the flakes that caught a coloured panel. Measured, that halves the flake
+light spilling past the die's edge, 3.3% to 1.7%, while making what is left
+*crisper* rather than dimmer: the brightest one percent of the added light stands
+25x over its average without the ceiling and 32x with it.
+
 Every flake parameter is a uniform, exposed through `window.dicer.debug.setFlakes`
 along with `setBloom`, which is how the contact sheets are swept without a rebuild.
 
@@ -406,11 +416,23 @@ impacts of the same kind measured 0.99 alike: the only things that varied were t
 centre frequency by a few hundred hertz and where the noise buffer was read from,
 neither of which changes the timbre.
 
-Now the noise excites a sharp top-end tick — the contact itself, under a
-millisecond of attack, which is most of what makes a die sound hard — and two or
-three high-Q modes on inharmonic ratios, ringing where the body of the die would.
-Each impact picks its own root, ratios, Q values, mode count and decay, so no two
-are alike, and a big die rings lower than a small one.
+Now a few milliseconds of noise carry the contact itself — the sharp top end that
+makes a die sound hard — and the body rings after it as three or four decaying
+sinusoids on inharmonic ratios, higher modes dying faster, which is why a struck
+object brightens for an instant and then darkens as it rings out. Each impact
+picks its own root, ratios, mode count, amplitudes and decays, and a big die rings
+lower than a small one.
+
+Getting there took one more correction. The first attempt rang the modes by
+holding noise through high-Q bandpass filters, and that still sounded synthetic
+for a reason worth writing down: a bandpass biquad at 4kHz with a Q of 20 rings
+for about Q/(pi*f), which is under two milliseconds. None of the forty to ninety
+it appeared to last came from the resonator — it came from noise being fed through
+it the whole time, and noise held through a filter is a hiss, not a strike. Struck
+solids ring down as sinusoids, so the modes are sinusoids, and the noise is back
+to being what it should have been all along: the moment of contact and nothing
+more. Two impacts of the same kind went from 0.89 alike to 0.60 on the same
+measure.
 
 Contacts are also told apart. Acrylic on felt, on leather and on acrylic sound
 nothing alike, so the physics guesses which happened — neighbours first, since a
@@ -428,7 +450,10 @@ sustain behind it instead.
 
 `npm run verify:sound` measures all of this rather than describing it: it renders
 impacts through the real class into an `OfflineAudioContext` and reports the share
-of energy above 6kHz and how alike two impacts of the same kind are. Its own first
+of energy above 6kHz, how alike two impacts of the same kind are, and how long
+each takes to fall 20dB. That last one guards the opposite failure: sinusoids that
+ring too long stop sounding like plastic and start sounding like a chime. A die is
+a click, and these land at 27ms on felt, 31 against the wall and 42 between dice. Its own first
 version was wrong in a way worth recording — plain cosine similarity between two
 log-magnitude spectra sits above 0.99 no matter how different the sounds, because
 it is measuring the offset they share rather than their shape. Centring each

@@ -61,6 +61,14 @@ export interface FlakeSettings {
    */
   contrast: number;
   /**
+   * Soft ceiling on how bright a single flake may end up. The contrast curve
+   * deliberately lets the best-placed flakes run well past 1.0 so the bloom pass
+   * picks them out, but bloom spreads energy rather than intensity: past a point
+   * a brighter flake stops reading as a sharper point and starts reading as a
+   * soft blob. This rolls the very top off and keeps the glint without the haze.
+   */
+  ceiling: number;
+  /**
    * How many pixels across a flake should be on screen. The lattice coarsens by
    * powers of two until it hits this, so 1.2 gives specks about a pixel wide at
    * any distance. Raising it makes the sparkle chunkier, not denser.
@@ -76,6 +84,7 @@ export const DEFAULT_FLAKES: FlakeSettings = {
   coverage: 0.75,
   tint: 0.4,
   contrast: 3,
+  ceiling: 2,
   grain: 1.2,
 };
 
@@ -98,6 +107,7 @@ export function createDiceMaterial(flakeSettings?: Partial<FlakeSettings>): Dice
     uFlakeCoverage: { value: flakes.coverage },
     uFlakeTint: { value: flakes.tint },
     uFlakeContrast: { value: flakes.contrast },
+    uFlakeCeiling: { value: flakes.ceiling },
     uFlakeGrain: { value: flakes.grain },
   };
 
@@ -138,6 +148,7 @@ export function createDiceMaterial(flakeSettings?: Partial<FlakeSettings>): Dice
       uniforms.uFlakeCoverage.value = flakes.coverage;
       uniforms.uFlakeTint.value = flakes.tint;
       uniforms.uFlakeContrast.value = flakes.contrast;
+      uniforms.uFlakeCeiling.value = flakes.ceiling;
       uniforms.uFlakeGrain.value = flakes.grain;
     },
     getFlakes: () => ({ ...flakes }),
@@ -168,6 +179,7 @@ uniform float uFlakePolish;
 uniform float uFlakeCoverage;
 uniform float uFlakeTint;
 uniform float uFlakeContrast;
+uniform float uFlakeCeiling;
 uniform float uFlakeGrain;
 
 /**
@@ -284,7 +296,13 @@ if (uFlakeStrength > 0.0) {
   // keeps the sparkle sitting in the resin rather than on top of it.
   vec3 flakeColor = mix(vec3(1.0), diffuseColor.rgb * 2.0, uFlakeTint);
 
-  outgoingLight += sparkle * flakeColor * fresnel * uFlakeStrength;
+  vec3 glint = sparkle * flakeColor * fresnel * uFlakeStrength;
+  // Roll the top off rather than clipping it, so the brightest flakes settle just
+  // above the bloom threshold instead of many times past it. Dividing by the peak
+  // channel keeps the hue: scaling the channels independently would drain the
+  // colour out of exactly the flakes that caught a coloured panel.
+  float peak = max(max(glint.r, glint.g), glint.b);
+  outgoingLight += glint * (uFlakeCeiling / (uFlakeCeiling + peak));
 }
 #endif
 `;

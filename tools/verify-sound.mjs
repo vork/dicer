@@ -124,7 +124,21 @@ try {
     // Log magnitudes make the comparison about shape rather than loudness.
     const shape = bands.map((b) => Math.log10(b.energy / total + 1e-9));
     const peak = Math.max(...r.samples.map(Math.abs));
-    return { ...r, bright: high / total, shape, peak };
+    // How long it takes to fall 20dB below its loudest moment. A die is a click:
+    // tens of milliseconds. Much past that and decaying sinusoids stop sounding
+    // like plastic and start sounding like a chime, which is the other way to be
+    // artificial.
+    const env = [];
+    const win = 64;
+    for (let i = 0; i + win < r.samples.length; i += win) {
+      let sum = 0;
+      for (let k = 0; k < win; k++) sum += r.samples[i + k] * r.samples[i + k];
+      env.push(Math.sqrt(sum / win));
+    }
+    const loudest = Math.max(...env);
+    const at = env.findIndex((v, i) => i > env.indexOf(loudest) && v < loudest * 0.1);
+    const decayMs = at < 0 ? Infinity : (at * win * 1000) / 44100;
+    return { ...r, bright: high / total, shape, peak, decayMs };
   });
 
   // Correlation, not raw cosine. Log magnitudes are all negative numbers of
@@ -165,7 +179,9 @@ try {
   console.log(`${analysed.length} impacts rendered offline\n`);
   for (const surface of ['floor', 'wall', 'dice']) {
     const rows = analysed.filter((a) => a.surface === surface);
-    console.log(`  ${surface.padEnd(6)} energy above 6kHz ${(mean(rows.map((r) => r.bright)) * 100).toFixed(1)}%   peak ${mean(rows.map((r) => r.peak)).toFixed(3)}`);
+    const decays = rows.map((r) => r.decayMs).filter((d) => Number.isFinite(d));
+    const decay = decays.length ? mean(decays).toFixed(0) : '>370';
+    console.log(`  ${surface.padEnd(6)} energy above 6kHz ${(mean(rows.map((r) => r.bright)) * 100).toFixed(1)}%   peak ${mean(rows.map((r) => r.peak)).toFixed(3)}   -20dB in ${decay}ms`);
   }
   console.log(`\n  energy above 6kHz, overall     ${(bright * 100).toFixed(1)}%`);
   console.log(`  likeness of two like impacts   ${mean(sameKind).toFixed(3)}  (1.000 = identical)`);
@@ -183,6 +199,11 @@ try {
   // similar, just not identical.
   if (mean(sameKind) > 0.95) {
     console.error(`\n  FAIL two impacts of the same kind are ${mean(sameKind).toFixed(3)} alike — every contact sounds the same`);
+    failed = true;
+  }
+  const slow = analysed.filter((a) => !Number.isFinite(a.decayMs) || a.decayMs > 220);
+  if (slow.length) {
+    console.error(`\n  FAIL ${slow.length} impact(s) ring on past 220ms — that is a chime, not a die`);
     failed = true;
   }
   if (analysed.some((a) => a.peak > 1.0)) {

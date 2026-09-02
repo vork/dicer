@@ -9,7 +9,7 @@ import type { ContactSurface } from './physics/dice-world';
  */
 
 /** Inharmonic, the way a small solid object rings. Not a harmonic series. */
-const MODES = [1, 1.63, 2.41];
+const MODES = [1, 1.63, 2.41, 3.32];
 
 /**
  * Acrylic on felt, on leather and on acrylic sound nothing alike, and having
@@ -117,7 +117,6 @@ export class DiceAudio {
     source.buffer = noise;
     source.playbackRate.value = 0.85 + Math.random() * 0.3;
     const ring = voice.decay * jitter(0.25) * (0.7 + level * 0.5);
-    source.start(now, Math.random() * 1.5, ring + 0.05);
 
     // The strike itself: a few milliseconds of top end, and the reason the old
     // version sounded muffled. A bandpass at 1.5-4kHz with a Q of one has
@@ -127,33 +126,43 @@ export class DiceAudio {
     edge.type = 'highpass';
     edge.frequency.value = 2600 * jitter(0.4);
     const tick = context.createGain();
+    const tickLength = 0.005 * jitter(0.35);
     tick.gain.setValueAtTime(0, now);
-    tick.gain.linearRampToValueAtTime(voice.tick * level, now + 0.0008);
-    tick.gain.exponentialRampToValueAtTime(0.0001, now + 0.006 * jitter(0.3));
+    tick.gain.linearRampToValueAtTime(voice.tick * level, now + 0.0006);
+    tick.gain.exponentialRampToValueAtTime(0.0001, now + tickLength);
     source.connect(edge).connect(tick).connect(placement);
+    // Milliseconds, not the whole ring: this is the contact, not the sound.
+    source.start(now, Math.random() * 1.5, tickLength + 0.01);
 
-    // And the body ringing. A small hard object has a handful of sharp modes
-    // rather than one broad band, and it is the modes that carry the character:
-    // where the old click randomised only its centre frequency and so came out
-    // the same every time, three high-Q resonators on inharmonic ratios give
-    // each impact its own pitch and colour. A big die rings lower.
+    // And the body ringing — as decaying sinusoids, not as noise held through a
+    // filter. That distinction is what made the old version sound synthetic: a
+    // bandpass biquad at 4kHz with a Q of 20 rings for about Q/(pi*f), which is
+    // under two milliseconds, so nothing of the forty to ninety it seemed to
+    // last came from the resonator. It came from noise being fed through it the
+    // whole time, and continuously-driven noise is a hiss, not a strike. Struck
+    // solids ring down as sinusoids, so these are sinusoids.
     const root = (voice.root * 0.5) / Math.max(radius, 0.2) * jitter(0.28);
-    // Two modes or three, chosen per impact. Dropping one changes the timbre far
-    // more than nudging a frequency does, and it is the cheapest source of real
-    // variety here — no two dice in a set ring quite alike either.
-    const modes = Math.random() < 0.35 ? MODES.slice(0, 2) : MODES;
+    const modes = Math.random() < 0.35 ? MODES.slice(0, 3) : MODES;
     for (const ratio of modes) {
-      const mode = context.createBiquadFilter();
-      mode.type = 'bandpass';
-      mode.frequency.value = Math.min(root * ratio * jitter(0.22), 17000);
-      mode.Q.value = voice.q * jitter(0.4);
-      const decay = context.createGain();
+      const mode = context.createOscillator();
+      mode.type = 'sine';
+      const hz = Math.min(root * ratio * jitter(0.22), 17000);
+      mode.frequency.setValueAtTime(hz * 1.012, now);
+      // Real modes sag a little as the contact lets go; dead-steady pitch is one
+      // of the things that reads as a synthesiser.
+      mode.frequency.exponentialRampToValueAtTime(hz, now + 0.012);
+      // Higher modes lose their energy faster, which is why a struck object
+      // brightens at the very start and then darkens as it rings out.
+      const tau = ring * jitter(0.3) / Math.pow(ratio, 0.7);
       const loudness =
-        voice.ring * level * (ratio === 1 ? 1 : 0.55 / ratio) * (0.55 + Math.random() * 0.6);
+        voice.ring * level * Math.pow(ratio, -1.1) * (0.55 + Math.random() * 0.6);
+      const decay = context.createGain();
       decay.gain.setValueAtTime(0, now);
-      decay.gain.linearRampToValueAtTime(loudness, now + 0.001);
-      decay.gain.exponentialRampToValueAtTime(0.0001, now + ring * jitter(0.35));
-      source.connect(mode).connect(decay).connect(placement);
+      decay.gain.linearRampToValueAtTime(loudness, now + 0.0006);
+      decay.gain.exponentialRampToValueAtTime(0.0001, now + tau);
+      mode.connect(decay).connect(placement);
+      mode.start(now);
+      mode.stop(now + tau + 0.02);
     }
 
     // Body: a short low sine, only on hits with real force behind them. Kept well

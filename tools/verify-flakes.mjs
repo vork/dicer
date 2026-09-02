@@ -82,10 +82,16 @@ try {
     const { camera, positions } = window.dicer.debug.diceScreenInfo();
     const THREE = window.dicer.debug.three;
     const p = positions[0];
-    const v = new THREE.Vector3(p.x, p.y, p.z).project(camera);
+    const centre = new THREE.Vector3(p.x, p.y, p.z);
+    const v = centre.clone().project(camera);
+    // A second point one die-radius to the camera's right, so the die's size on
+    // screen is measured rather than guessed.
+    const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);
+    const edge = centre.clone().addScaledVector(right, p.radius).project(camera);
     return {
       x: Math.round((v.x * 0.5 + 0.5) * window.innerWidth),
       y: Math.round((-v.y * 0.5 + 0.5) * window.innerHeight),
+      screenRadius: Math.abs(edge.x - v.x) * 0.5 * window.innerWidth,
     };
   });
   const half = 70;
@@ -106,7 +112,55 @@ try {
     return sum / a.length;
   };
 
-  const base = await page.evaluate(() => window.dicer.debug.getFlakes());
+  // --- how much of the flakes' light escapes the die as glow -----------------
+  // Bloom spreads energy rather than intensity, so a flake far above the bloom
+  // threshold stops reading as a brighter point and starts reading as a soft
+  // blob. Rendering with the flakes on and off and differencing isolates exactly
+  // what they contribute; splitting that by radius says how much of it landed on
+  // the die and how much bled past its edge.
+  const flakes0 = await page.evaluate(() => window.dicer.debug.getFlakes());
+  await page.evaluate(() => window.dicer.debug.setFlakes({ strength: 0 }));
+  await frames(3);
+  const dark = await shoot();
+  await page.evaluate((f) => window.dicer.debug.setFlakes(f), flakes0);
+  await frames(3);
+  const lit = await shoot();
+
+  const cx = box.x - crop.x;
+  const cy = box.y - crop.y;
+  let onDie = 0;
+  let spill = 0;
+  for (let y = 0; y < crop.height; y++) {
+    for (let x = 0; x < crop.width; x++) {
+      const i = y * crop.width + x;
+      const added = Math.max(0, lit[i] - dark[i]);
+      const r = Math.hypot(x - cx, y - cy);
+      if (r <= box.screenRadius) onDie += added;
+      else if (r <= box.screenRadius * 2.2) spill += added;
+    }
+  }
+  // How pointy the added light is. Crisp glints put most of their energy in a few
+  // pixels, so the brightest percentile towers over the mean; bloomed ones spread
+  // it into a wash and the two converge.
+  const added = [];
+  for (let i = 0; i < lit.length; i++) added.push(Math.max(0, lit[i] - dark[i]));
+  const ranked = added.slice().sort((a, b) => a - b);
+  const meanAdded = added.reduce((a, b) => a + b, 0) / added.length;
+  const top = ranked[Math.floor(ranked.length * 0.99)];
+  const peakiness = top / Math.max(meanAdded, 1e-6);
+
+  const halo = spill / Math.max(onDie, 1e-6);
+  console.log(`flake light landing outside the die  ${(halo * 100).toFixed(1)}% of what lands on it`);
+  console.log(`brightest 1% over the average        ${peakiness.toFixed(1)}x  (higher = crisper points)`);
+  // Some spill is the point — a glint should glow a little. Past a third and the
+  // dice are wearing a haze rather than sparkling.
+  if (halo > 0.33) {
+    console.error(`  FAIL the flakes bloom into a haze (${(halo * 100).toFixed(0)}% spills past the die)`);
+    failed = true;
+  }
+  console.log('');
+
+  const base = flakes0;
   const setGrain = (g) => page.evaluate((v) => window.dicer.debug.setFlakes({ grain: v }), g);
 
   // A statistical version of this — sweep the grain, look for an outlier step —
