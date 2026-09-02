@@ -27,7 +27,13 @@ import * as THREE from 'three';
 export interface FlakeSettings {
   /** Overall brightness of the sparkle. 0 turns it off entirely. */
   strength: number;
-  /** Flakes per world unit; a die is one unit across. */
+  /**
+   * Flakes per world unit at full detail; a die is one unit, or about 20mm. 240
+   * puts a flake at roughly 0.08mm, which is the right order for real metallic
+   * paint. It is a ceiling rather than a promise: what actually gets drawn is
+   * this lattice coarsened until a flake is `grain` pixels across, so the number
+   * only bites when the camera is close enough to resolve it.
+   */
   density: number;
   /**
    * How far a flake tilts out of the surface. 1.0 is about 45 degrees. Real
@@ -55,21 +61,22 @@ export interface FlakeSettings {
    */
   contrast: number;
   /**
-   * Lattice cells per pixel at which flakes start and finish fading out. 0.7
-   * means "full strength while a flake still spans about a pixel and a half".
+   * How many pixels across a flake should be on screen. The lattice coarsens by
+   * powers of two until it hits this, so 1.2 gives specks about a pixel wide at
+   * any distance. Raising it makes the sparkle chunkier, not denser.
    */
-  fade: [number, number];
+  grain: number;
 }
 
 export const DEFAULT_FLAKES: FlakeSettings = {
   strength: 1.7,
-  density: 78,
+  density: 240,
   spread: 1.3,
   polish: 0.01,
   coverage: 0.75,
   tint: 0.4,
   contrast: 3,
-  fade: [0.7, 1.6],
+  grain: 1.2,
 };
 
 export interface DiceMaterial {
@@ -91,7 +98,7 @@ export function createDiceMaterial(flakeSettings?: Partial<FlakeSettings>): Dice
     uFlakeCoverage: { value: flakes.coverage },
     uFlakeTint: { value: flakes.tint },
     uFlakeContrast: { value: flakes.contrast },
-    uFlakeFade: { value: new THREE.Vector2(flakes.fade[0], flakes.fade[1]) },
+    uFlakeGrain: { value: flakes.grain },
   };
 
   const material = new THREE.MeshPhysicalMaterial({
@@ -131,7 +138,7 @@ export function createDiceMaterial(flakeSettings?: Partial<FlakeSettings>): Dice
       uniforms.uFlakeCoverage.value = flakes.coverage;
       uniforms.uFlakeTint.value = flakes.tint;
       uniforms.uFlakeContrast.value = flakes.contrast;
-      uniforms.uFlakeFade.value.set(flakes.fade[0], flakes.fade[1]);
+      uniforms.uFlakeGrain.value = flakes.grain;
     },
     getFlakes: () => ({ ...flakes }),
   };
@@ -161,15 +168,14 @@ uniform float uFlakePolish;
 uniform float uFlakeCoverage;
 uniform float uFlakeTint;
 uniform float uFlakeContrast;
-uniform vec2 uFlakeFade;
+uniform float uFlakeGrain;
 
 /**
  * How many lattice cells one pixel step covers, along whichever screen axis is
- * worse. Below one, flakes are resolvable; above it they are sub-pixel and turn
- * into crawling noise. fwidth() would do here, but it sums the two derivatives
- * across all three components and comes out around twice the real footprint,
- * which is enough to fade the sparkle away while the flakes are still two
- * pixels wide.
+ * worse. This is what picks the mip level below, so it has to be the real
+ * number: fwidth() sums both derivatives across all three components and comes
+ * out around twice the true footprint, which would coarsen the lattice a whole
+ * level too early and double the size of every speck.
  */
 float flakeFootprint(vec3 p) {
   return max(length(dFdx(p)), length(dFdy(p)));
@@ -198,24 +204,33 @@ if (uFlakeStrength > 0.0) {
   vec3 flakeT = normalize(vFlakeTangent - flakeN * dot(flakeN, vFlakeTangent));
   vec3 flakeB = cross(flakeN, flakeT);
 
-  // Two lattices, at different scales and both rotated off the axes. A single
-  // cubic grid sliced by a flat die face reads as a regular checkerboard; two
-  // skewed ones do not.
+  // Real flakes are far finer than a pixel, and a flake finer than a pixel
+  // cannot be point-sampled without turning the sparkle into crawling noise.
+  // Fading them out was the first answer and it was the wrong one: it made the
+  // dice go flat exactly when they were small, and it capped how fine the
+  // flakes could ever be, because anything finer simply faded away.
+  //
+  // So the lattice is mip-mapped instead. It coarsens by powers of two until a
+  // cell is about uFlakeGrain pixels across, and cross-fades between the two
+  // levels either side. Up close you get the flake size the paint actually has;
+  // further away you get the same speck size on screen drawn from a coarser
+  // lattice, which is a fair sample of the same distribution rather than a blur
+  // of it — so the dice stay sparkly at any distance instead of dulling off.
+  vec3 base = vFlakePosition * uFlakeDensity;
+  float lod = max(0.0, log2(max(flakeFootprint(base) * uFlakeGrain, 1e-6)));
+  float coarse = floor(lod);
+  float blend = lod - coarse;
+
+  // The two levels get different skews so neither reads as a cubic grid sliced
+  // flat by a die face, which is what a single axis-aligned lattice looks like.
   mat3 skewA = mat3(0.80, 0.42, -0.43, -0.53, 0.83, -0.18, 0.28, 0.36, 0.89);
   mat3 skewB = mat3(0.36, -0.80, 0.48, 0.87, 0.47, 0.13, -0.33, 0.37, 0.87);
-  vec3 pA = skewA * vFlakePosition * uFlakeDensity;
-  vec3 pB = skewB * vFlakePosition * uFlakeDensity * 1.83;
-
-  // Once a cell is smaller than a pixel the sparkle degenerates into crawling
-  // noise, so each layer fades out as its footprint approaches one cell per
-  // pixel. This is why the dice glitter as the reveal closes in and settle to a
-  // quiet satin at the wide framing — the same thing a mip chain would do.
-  float fadeA = 1.0 - smoothstep(uFlakeFade.x, uFlakeFade.y, flakeFootprint(pA));
-  float fadeB = 1.0 - smoothstep(uFlakeFade.x, uFlakeFade.y, flakeFootprint(pB));
+  vec3 pA = skewA * base * exp2(-coarse);
+  vec3 pB = skewB * base * exp2(-coarse - 1.0);
 
   vec3 sparkle = vec3(0.0);
   for (int layer = 0; layer < 2; layer++) {
-    float fade = layer == 0 ? fadeA : fadeB;
+    float fade = layer == 0 ? 1.0 - blend : blend;
     if (fade <= 0.0) continue;
 
     vec3 cell = floor(layer == 0 ? pA : pB);
@@ -245,7 +260,7 @@ if (uFlakeStrength > 0.0) {
     // whatever the setting, so strength and contrast can be tuned apart.
     float lum = max(dot(radiance, vec3(0.2126, 0.7152, 0.0722)), 1e-4);
     radiance *= pow(lum / 3.0, uFlakeContrast - 1.0);
-    sparkle += radiance * fade * (layer == 0 ? 1.0 : 0.6);
+    sparkle += radiance * fade;
   }
 
   // Seen through a clear coat, so flakes fire harder at glancing angles.

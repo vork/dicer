@@ -161,16 +161,29 @@ and drops the duplicated list of light positions.
 The base stays non-metallic. Turning the whole material metallic would take the
 painted numerals down with it, and the numerals are the entire point of the app.
 
-Flakes go sub-pixel long before the die does, and a sub-pixel flake field is just
-crawling noise, so each of the two lattices fades out as its cells approach one
-per pixel — what a mip chain does for a texture, done by hand. The dice come up
-glittering as the reveal closes in and settle to a quiet satin at the wide
-framing. Measuring that footprint with `fwidth` is what the first pass did and it
-was wrong by roughly a factor of two: it sums both derivatives across all three
-components, which faded the sparkle out while the flakes were still two pixels
-wide and left the reveal looking untouched. `max(length(dFdx), length(dFdy))` is
-cells per pixel along the worse screen axis, which is the thing actually being
-asked about.
+Real flakes are far finer than a pixel, and a flake finer than a pixel cannot be
+point-sampled without the sparkle turning into crawling noise. The first answer
+was to fade them out as they approached one cell per pixel, and it was the wrong
+one twice over: the dice went flat exactly when they were small, and it put a
+ceiling on how fine the flakes could ever be, because anything finer than about a
+quarter of a millimetre simply faded away before it could be seen. Which is what
+made them look too big.
+
+So the lattice is mip-mapped instead. It coarsens by powers of two until a cell is
+about `grain` pixels across and cross-fades between the two levels either side.
+Up close you get the flake size the paint actually has; further away you get the
+same speck size on screen drawn from a coarser lattice — a fair sample of the same
+distribution rather than a blur of it, so the dice stay sparkly at any distance.
+`density` is now a ceiling rather than a promise: at 240 flakes per unit a flake
+is about 0.08mm on a 20mm die, the right order for real metallic paint, and how
+much of that detail survives is the camera's business rather than the setting's.
+`grain` is the knob that decides how big a speck looks, and it does it in pixels.
+
+Getting the footprint right matters more than it sounds, since it now picks the
+mip level: `fwidth` sums both derivatives across all three components and reads
+about twice the true value, which coarsens the lattice a whole level too early and
+doubles the size of every speck. `max(length(dFdx), length(dFdy))` is cells per
+pixel along the worse screen axis, which is the thing actually being asked.
 
 What makes them read as flakes rather than as sugar is contrast. The environment's
 own range is too gentle to say "this flake caught a light and that one did not",

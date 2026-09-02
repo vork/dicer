@@ -1,10 +1,10 @@
 [
-  { "label": "a-off",       "strength": 0 },
-  { "label": "b-default"                  },
-  { "label": "c-flat",      "contrast": 1 },
-  { "label": "d-harder",    "contrast": 3.8 },
-  { "label": "e-dimmer",    "strength": 1.1 },
-  { "label": "f-brighter",  "strength": 2.4 },
-  { "label": "g-coarse",    "density": 50 },
-  { "label": "h-blurred",   "polish": 0.05 }
+  { "label": "a-off",      "strength": 0 },
+  { "label": "b-default"                 },
+  { "label": "c-finer",    "grain": 0.8 },
+  { "label": "d-coarser",  "grain": 2.0 },
+  { "label": "e-flat",     "contrast": 1 },
+  { "label": "f-harder",   "contrast": 3.8 },
+  { "label": "g-dimmer",   "strength": 1.1 },
+  { "label": "h-sparser",  "coverage": 0.5 }
 ]
