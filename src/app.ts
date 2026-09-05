@@ -205,7 +205,9 @@ export class App {
     const delta = Math.min(this.clock.getDelta(), 0.05);
 
     const { impacts, justSettled } = this.diceWorld.step(delta);
-    for (const impact of impacts) this.audio.impact(impact.strength, impact.pan, impact.surface, impact.radius);
+    for (const impact of impacts) {
+      this.audio.impact(impact.strength, impact.pan, impact.surface, impact.radius, impact.when);
+    }
 
     if (justSettled) this.onSettled();
 

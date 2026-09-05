@@ -127,10 +127,26 @@ try {
       const other = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : null;
       const mono = new Float32Array(ch.length);
       for (let i = 0; i < ch.length; i++) mono[i] = other ? (ch[i] + other[i]) / 2 : ch[i];
-      return { rate: buffer.sampleRate, samples: Array.from(mono) };
+      // How alike the two channels are. A mono source panned into stereo is
+      // perfectly correlated at 1.000; anything recorded in a room is not,
+      // because the two microphones hear different reflections.
+      let correlation = 1;
+      if (other) {
+        let dot = 0;
+        let na = 0;
+        let nb = 0;
+        for (let i = 0; i < ch.length; i++) { dot += ch[i] * other[i]; na += ch[i] * ch[i]; nb += other[i] * other[i]; }
+        correlation = dot / Math.sqrt(na * nb || 1e-12);
+      }
+      return {
+        rate: buffer.sampleRate,
+        samples: Array.from(mono),
+        channels: buffer.numberOfChannels,
+        correlation,
+      };
     }, b64);
 
-    const { rate, samples } = decoded;
+    const { rate, samples, channels, correlation } = decoded;
 
     // Onsets off the energy envelope: a local maximum that stands well clear of
     // the running floor, and at least 40ms clear of the last one.
@@ -152,18 +168,42 @@ try {
     }
 
     const rows = [];
-    for (const o of onsets) {
+    for (let oi = 0; oi < onsets.length; oi++) {
+      const o = onsets[oi];
+      // Whether the next contact arrives before this one has finished. Anything
+      // measured past that point is the next impact, not this one's tail.
+      const clearMs = oi + 1 < onsets.length ? (onsets[oi + 1] - o) * 2 : 1000;
       const start = Math.max(0, o * hop - Math.round(rate * 0.002));
       const slice = samples.slice(start, start + Math.round(rate * 0.25));
       if (slice.length < 2048) continue;
       const bands = analyse(slice, rate);
+      // How much arrives after the strike itself. A dry synthetic hit is over
+      // when its modes stop; anything recorded in a room keeps going, because the
+      // table and the walls are still returning it.
+      const win = (a, b) => {
+        let sum = 0;
+        const lo = Math.round(rate * a);
+        const hi = Math.min(slice.length, Math.round(rate * b));
+        for (let i = lo; i < hi; i++) sum += slice[i] * slice[i];
+        return sum;
+      };
+      const early = win(0, 0.025) || 1e-12;
+      const late = win(0.025, 0.2);
+      // Crest factor over the strike: peak over RMS. Smooth enveloped noise sits
+      // low; a real contact is spiky, because it is a great many tiny collisions
+      // between surface asperities rather than one smooth push.
+      const head = slice.slice(0, Math.round(rate * 0.03));
+      let sq = 0;
+      let pk = 0;
+      for (const v of head) { sq += v * v; pk = Math.max(pk, Math.abs(v)); }
+      const crest = pk / (Math.sqrt(sq / head.length) || 1e-12);
       // -20dB decay, measured on the same envelope.
       const peakIndex = o;
       let decay = Infinity;
       for (let i = peakIndex; i < env.length; i++) {
         if (env[i] < env[peakIndex] * 0.1) { decay = (i - peakIndex) * 2; break; }
       }
-      rows.push({ ...bands, decay });
+      rows.push({ ...bands, decay, tail: late / early, clearMs, crest });
     }
 
     // How alike two impacts from the same recording are, by the same centred
@@ -188,6 +228,12 @@ try {
       for (let j = i + 1; j < rows.length; j++) pairs.push(centred(rows[i].shape, rows[j].shape));
     }
 
+    // The shape of the roll itself, not of one impact. How fast contacts arrive
+    // and how that changes as the dice lose energy is a large part of what a roll
+    // sounds like, and no per-impact statistic can see it.
+    const intervals = [];
+    for (let i = 1; i < onsets.length; i++) intervals.push((onsets[i] - onsets[i - 1]) * 2);
+
     const median = (xs) => {
       const s = xs.slice().sort((a, b) => a - b);
       return s[Math.floor(s.length / 2)];
@@ -202,6 +248,15 @@ try {
     console.log(`    spectral flatness  ${median(rows.map((r) => r.flatness)).toFixed(3)}`);
     console.log(`    -20dB in           ${decays.length ? median(decays).toFixed(0) : '?'}ms`);
     console.log(`    likeness of two    ${pairs.length ? median(pairs).toFixed(3) : '?'}`);
+    const isolated = rows.filter((r) => r.clearMs >= 200);
+    const tailNote = isolated.length
+      ? `${(median(isolated.map((r) => r.tail)) * 100).toFixed(1)}% of the strike's energy (${isolated.length} isolated impacts)`
+      : `${(median(rows.map((r) => r.tail)) * 100).toFixed(1)}% — but no impact here is isolated, so this includes the next one`;
+    console.log(`    tail after 25ms    ${tailNote}`);
+    console.log(`    L/R correlation    ${channels > 1 ? correlation.toFixed(3) : 'mono file'}`);
+    console.log(`    crest factor       ${median(rows.map((r) => r.crest)).toFixed(2)}  (peak over RMS, first 30ms)`);
+    console.log(`    contacts           ${onsets.length} in ${(samples.length / rate).toFixed(1)}s = ${(onsets.length / (samples.length / rate)).toFixed(1)}/s`);
+    console.log(`    gaps between them  ${intervals.length ? intervals.map((v) => v.toFixed(0)).join(', ') : '-'} ms`);
   }
 } finally {
   await browser.close();

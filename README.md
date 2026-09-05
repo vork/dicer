@@ -414,11 +414,12 @@ faster, which is why a struck object brightens for an instant and then darkens a
 it rings out. Each impact draws its own root, ratios, mode count, amplitudes and
 decays, and a big die rings lower than a small one. Nothing is sampled.
 
-It took seven passes to get there, and every fault is worth recording. Each was
+It took eight passes to get there, and every fault is worth recording. Each was
 audible before it was measurable; two came from a correct calculation applied to
 the wrong case; two more came from assumptions about what real dice sound like
-that the recordings simply disproved; and the last one was not in the synthesis at
-all but in the bus it was played through.
+that the recordings disproved; one was not in the synthesis at all but in the bus
+it was played through; and the last was not in the sound at all but in when the
+sounds were scheduled.
 
 **Muffled and same-y.** It began as a single bandpass at 1.5-4kHz with a Q of
 about one. A filter that shape has essentially nothing above 8kHz, so the sound
@@ -480,6 +481,27 @@ digital grit being avoided. Removing the compression also let the peaks back up
 from 0.20 to 0.37 and shortened the measured decay by several milliseconds, which
 is the tail it had been smearing.
 
+**Still digital.** With every per-impact measure now sitting inside the
+recordings' range — bands, centroid, flatness, decay, likeness, tail, crest factor,
+even stereo correlation, which turned out to be 1.000 in both recordings and killed
+a reverb I was about to build — what was left was the one dimension no per-impact
+statistic can see: the sequence.
+
+Contacts were being found once per rendered frame, but the solver takes up to
+eight steps per frame. So a die's whole deceleration across those steps collapsed
+into one event, several separate taps were heard as one, and every contact in a
+frame carried the same timestamp — three frames in nine of a measured roll had
+more than one, and those summed coherently into a single loud blip instead of
+sounding like the taps they were.
+
+Contacts are found per solver step now, and each carries the time it happened, so
+the audio is scheduled where the physics put it rather than at the frame boundary.
+One step is FIXED_DT of simulated time and TIME_SCALE times that in real time, so
+contacts within a frame land up to seventy milliseconds apart. Two dice in the
+same step get a couple of milliseconds of scatter on top, because two dice do not
+land in the same microsecond and identical timestamps stack. A roll went from
+twelve contacts to twenty-one, which is the clatter that was missing.
+
 **High and thin.** Those modes were pitched at 3.6-5.2kHz, which left 0.6% of every
 impact's energy below 2.5kHz and 71% above it — all edge, no object. The modes
 moved down to 950-1550Hz, the contact noise's high-pass came down with them, the
@@ -494,8 +516,15 @@ swallows the ring; dice striking each other are the brightest thing in the tray.
 
 `npm run verify:sound` measures all of this rather than describing it. It renders
 impacts through the real class into an `OfflineAudioContext` and reports where the
-energy sits across four bands, the spectral centroid, how alike two impacts of the
-same kind are, and how long each takes to fall 20dB.
+energy sits across four bands, the spectral centroid, spectral flatness, the crest
+factor, how much arrives after the strike, the stereo correlation, how alike two
+impacts of the same kind are, and how long each takes to fall 20dB.
+
+That list grew one measure at a time, each added to chase a fault the existing
+ones could not see — and the last fault was invisible to all of them, because
+every one describes a single impact and the problem was in the spacing between
+them. A measurement suite converging on a reference is not the same as being
+right.
 
 What it checks those numbers against is two real dice recordings rather than a
 theory. `npm run sound:reference <file>` measures any recording the same way —

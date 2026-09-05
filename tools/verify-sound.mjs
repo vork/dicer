@@ -142,7 +142,15 @@ try {
       const right = buffer.getChannelData(1);
       const mono = new Float32Array(left.length);
       for (let i = 0; i < left.length; i++) mono[i] = (left[i] + right[i]) / 2;
-      out.push({ ...c, samples: Array.from(mono.subarray(0, 16384)) });
+      let dot = 0;
+      let na = 0;
+      let nb = 0;
+      for (let i = 0; i < left.length; i++) { dot += left[i] * right[i]; na += left[i] * left[i]; nb += right[i] * right[i]; }
+      out.push({
+        ...c,
+        samples: Array.from(mono.subarray(0, 16384)),
+        correlation: dot / Math.sqrt(na * nb || 1e-12),
+      });
     }
     return { rate: RATE, out };
   });
@@ -184,6 +192,25 @@ try {
     // Log magnitudes make the comparison about shape rather than loudness.
     const shape = bands.map((b) => Math.log10(b.energy / total + 1e-9));
     const peak = Math.max(...r.samples.map(Math.abs));
+    // Energy arriving after the strike is over. A dry synthetic impact stops when
+    // its modes stop; a recorded one keeps going, because the table and the room
+    // are still returning it.
+    const energyIn = (a, b) => {
+      let sum = 0;
+      const lo = Math.round(44100 * a);
+      const hi = Math.min(r.samples.length, Math.round(44100 * b));
+      for (let i = lo; i < hi; i++) sum += r.samples[i] * r.samples[i];
+      return sum;
+    };
+    const tail = energyIn(0.025, 0.2) / (energyIn(0, 0.025) || 1e-12);
+    // Peak over RMS across the strike. Smooth enveloped noise sits low; a real
+    // contact is spiky, being a great many tiny collisions between surface
+    // asperities rather than one smooth push.
+    const head = r.samples.slice(0, Math.round(44100 * 0.03));
+    let sq = 0;
+    let pk = 0;
+    for (const v of head) { sq += v * v; pk = Math.max(pk, Math.abs(v)); }
+    const crest = pk / (Math.sqrt(sq / head.length) || 1e-12);
     // How long it takes to fall 20dB below its loudest moment. A die is a click:
     // tens of milliseconds. Much past that and decaying sinusoids stop sounding
     // like plastic and start sounding like a chime, which is the other way to be
@@ -198,7 +225,7 @@ try {
     const loudest = Math.max(...env);
     const at = env.findIndex((v, i) => i > env.indexOf(loudest) && v < loudest * 0.1);
     const decayMs = at < 0 ? Infinity : (at * win * 1000) / 44100;
-    return { ...r, bright: high / total, shape, peak, decayMs, body, mid, harsh, air, centroid, flatness };
+    return { ...r, bright: high / total, shape, peak, decayMs, body, mid, harsh, air, centroid, flatness, tail, crest, correlation: r.correlation };
   });
 
   // Correlation, not raw cosine. Log magnitudes are all negative numbers of
@@ -254,6 +281,9 @@ try {
   console.log(`\n  spectral centroid              ${centroid.toFixed(0)}Hz`);
   console.log(`  below 2.5kHz vs above          ${(below / Math.max(above, 1e-6)).toFixed(1)}x`);
   console.log(`  spectral flatness              ${mean(analysed.map((a) => a.flatness)).toFixed(3)}  (low = tonal, high = clattery)`);
+  console.log(`  tail after 25ms                ${(mean(analysed.map((a) => a.tail)) * 100).toFixed(1)}% of the strike's energy`);
+  console.log(`  L/R correlation                ${mean(analysed.map((a) => a.correlation)).toFixed(3)}  (1.000 = the same signal twice)`);
+  console.log(`  crest factor                   ${mean(analysed.map((a) => a.crest)).toFixed(2)}  (peak over RMS, first 30ms)`);
   console.log('');
   console.log('  two real recordings, measured the same way:');
   console.log('    freesound rpg dice   body 11.9  mid 84.6  harsh  3.4  air 0.0   1383Hz  24ms');

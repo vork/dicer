@@ -70,6 +70,15 @@ export interface Impact {
   surface: ContactSurface;
   /** The die's bounding radius, so a big die can ring lower than a small one. */
   radius: number;
+  /**
+   * Seconds after the start of this frame that the contact actually happened.
+   *
+   * The solver takes up to eight steps per rendered frame, so contacts inside
+   * one frame are as much as seventy milliseconds apart. Playing them all at the
+   * frame boundary stacked them at an identical sample, where they summed
+   * coherently into one loud blip instead of sounding like separate taps.
+   */
+  when: number;
 }
 
 export interface StepResult {
@@ -399,11 +408,38 @@ export class DiceWorld {
     const impacts: Impact[] = [];
     this.accumulator += Math.min(delta, 0.1) / TIME_SCALE;
 
+    // Contacts are found per solver step rather than per frame. Done once a
+    // frame, a die's whole deceleration over eight steps collapsed into a single
+    // event, so several separate taps were heard as one — and every contact in
+    // the frame carried the same timestamp.
     let steps = 0;
     while (this.accumulator >= FIXED_DT && steps < MAX_SUBSTEPS) {
       this.world.step();
       this.accumulator -= FIXED_DT;
+      // One solver step is FIXED_DT of simulated time, which is TIME_SCALE times
+      // that in real time, so this is when the contact will be heard.
+      const when = steps * FIXED_DT * TIME_SCALE;
       steps++;
+
+      for (const die of this.dice) {
+        const linear = die.body.linvel();
+        const speed = Math.hypot(linear.x, linear.y, linear.z);
+
+        // A sharp drop in speed is a collision; its size is how hard the hit was.
+        const deceleration = die.previousSpeed - speed;
+        if (deceleration > 2.2) {
+          const t = die.body.translation();
+          const radius = this.assets.info[die.type].radius;
+          impacts.push({
+            strength: THREE.MathUtils.clamp(deceleration / 34, 0, 1),
+            pan: THREE.MathUtils.clamp(t.x / (TRAY.innerWidth / 2), -1, 1),
+            surface: this.contactSurface(die, radius),
+            radius,
+            when,
+          });
+        }
+        die.previousSpeed = speed;
+      }
     }
     // If we fell far behind, drop the backlog rather than spiralling.
     if (steps === MAX_SUBSTEPS) this.accumulator = 0;
@@ -413,20 +449,6 @@ export class DiceWorld {
       const angular = die.body.angvel();
       const speed = Math.hypot(linear.x, linear.y, linear.z);
       const spin = Math.hypot(angular.x, angular.y, angular.z);
-
-      // A sharp drop in speed is a collision; its size is how hard the hit was.
-      const deceleration = die.previousSpeed - speed;
-      if (deceleration > 3.5) {
-        const t = die.body.translation();
-        const radius = this.assets.info[die.type].radius;
-        impacts.push({
-          strength: THREE.MathUtils.clamp(deceleration / 34, 0, 1),
-          pan: THREE.MathUtils.clamp(t.x / (TRAY.innerWidth / 2), -1, 1),
-          surface: this.contactSurface(die, radius),
-          radius,
-        });
-      }
-      die.previousSpeed = speed;
 
       // Rescue anything that somehow escaped the tray.
       if (die.body.translation().y < TRAY.floorY - 6) {

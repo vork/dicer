@@ -116,7 +116,7 @@ export class DiceAudio {
    * @param surface what it hit
    * @param radius the die's bounding radius, in world units
    */
-  impact(strength: number, pan = 0, surface: ContactSurface = 'floor', radius = 0.5) {
+  impact(strength: number, pan = 0, surface: ContactSurface = 'floor', radius = 0.5, when = 0) {
     if (!this.enabled) return;
     if (!this.context) this.init();
     const context = this.context;
@@ -124,11 +124,24 @@ export class DiceAudio {
     const noise = this.noise;
     if (!context || !master || !noise || context.state !== 'running') return;
 
-    // Rate-limit: a scattering handful of dice can fire dozens of contacts a frame.
-    const now = context.currentTime;
-    if (now - this.lastPlayed > 0.09) this.playedInWindow = 0;
-    if (this.playedInWindow >= 4) return;
-    this.lastPlayed = now;
+    // Placed where the solver says it happened, not at the frame boundary. The
+    // solver takes up to eight steps a frame, so contacts within one frame are
+    // as much as seventy milliseconds apart; playing them together stacked them
+    // at an identical sample, where they summed into one blip rather than
+    // sounding like the separate taps they are.
+    // Two dice landing in the same solver step are not landing at the same
+    // microsecond, and identical timestamps sum coherently into one loud click
+    // rather than two taps. A couple of milliseconds of scatter is below the
+    // threshold where it reads as a delay and above the one where it stacks.
+    const now = context.currentTime + Math.max(0, when) + Math.random() * 0.004;
+
+    // Rate-limit: a scattering handful of dice can fire dozens of contacts a
+    // frame. Measured against the frame boundary rather than the placed time, so
+    // that spreading contacts out does not spend the budget faster.
+    const arrived = context.currentTime;
+    if (arrived - this.lastPlayed > 0.09) this.playedInWindow = 0;
+    if (this.playedInWindow >= 7) return;
+    this.lastPlayed = arrived;
     this.playedInWindow++;
 
     // Most contacts in a roll are gentle settling taps rather than the opening
