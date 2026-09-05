@@ -20,19 +20,30 @@ const MODES = [1, 1.42, 1.93, 2.51, 3.14, 3.87, 4.6];
  * every contact sound the same was most of why the old version was monotonous.
  * Felt swallows the ring almost entirely; a die struck by another die is the
  * brightest thing in the tray.
+ *
+ * The roots are close together on purpose, though they did not start that way.
+ * Most of the pitch you hear when a die lands is the tray, and the tray is the
+ * same object whichever face hit it — only the die-on-die contact is genuinely a
+ * different resonator. Spread over 880-1400Hz, the root jumped by more than half
+ * an octave depending on what each contact happened to touch, and since die-on-die
+ * is the commonest contact of all the sound lurched between two pitches all the
+ * way through a roll.
  */
 const SURFACES: Record<
   ContactSurface,
   { root: number; decay: number; tick: number; ring: number; body: number }
 > = {
-  floor: { root: 880, decay: 0.016, tick: 0.18, ring: 0.85, body: 0.55 },
-  wall: { root: 1050, decay: 0.022, tick: 0.25, ring: 0.90, body: 0.40 },
-  dice: { root: 1400, decay: 0.027, tick: 0.35, ring: 1.00, body: 0.22 },
+  floor: { root: 900, decay: 0.016, tick: 0.21, ring: 0.85, body: 0.50 },
+  wall: { root: 1010, decay: 0.019, tick: 0.26, ring: 0.90, body: 0.42 },
+  dice: { root: 1190, decay: 0.021, tick: 0.32, ring: 1.00, body: 0.33 },
 };
 export class DiceAudio {
   private context: AudioContext | null = null;
   private master: GainNode | null = null;
   private noise: AudioBuffer | null = null;
+  private floor: GainNode | null = null;
+  private bed: AudioBufferSourceNode | null = null;
+  private floorStarted = false;
   private lastPlayed = 0;
   private playedInWindow = 0;
   private enabled = true;
@@ -47,30 +58,67 @@ export class DiceAudio {
   /**
    * A small, soft room with a table in it, generated rather than sampled.
    *
-   * Four early reflections in the first forty milliseconds — the tabletop and
-   * whatever is nearest — over an exponentially decaying noise tail that is
-   * progressively darker, because a room absorbs the top end long before the
-   * bottom.
+   * Dense scattered reflections over a decaying noise tail. Both halves of that
+   * are corrections. The reflections were four single samples at 6, 11, 19 and
+   * 31ms — and one sample at 0.45 is a full-bandwidth impulse, about the most
+   * synthetic object that can exist in a buffer. A table scatters dozens of
+   * overlapping arrivals, each one filtered by the surface it came off, so that
+   * is what these are: short bursts at irregular times, never a lone spike.
+   *
+   * The tail's low pass used to close from 2.1kHz down to 380Hz across the decay,
+   * which is a wah pedal shutting on every impact, and reads exactly as hearing
+   * the dice through water. Rooms do get darker as they decay, but nowhere near
+   * that far or that fast: this closes to 1.4kHz and stops.
    */
   private static tabletop(context: BaseAudioContext): AudioBuffer {
     const rate = context.sampleRate;
-    const length = Math.floor(rate * 0.32);
+    const length = Math.floor(rate * 0.34);
     const buffer = context.createBuffer(2, length, rate);
+    // Deterministic, so the room is the same room on every impact and between
+    // reloads — it is one table, not a new one per hit.
+    let seed = 0x2f6e2b1;
+    const rand = () => {
+      seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+      return seed / 0x7fffffff;
+    };
     for (let channel = 0; channel < 2; channel++) {
       const data = buffer.getChannelData(channel);
       let low = 0;
       for (let i = 0; i < length; i++) {
         const t = i / rate;
-        // One-pole low pass that closes as the tail decays, so the room gets
-        // duller as it dies away rather than hissing to the end.
-        const coefficient = 0.25 - 0.2 * Math.min(1, t / 0.32);
-        low += coefficient * ((Math.random() * 2 - 1) - low);
-        data[i] = low * Math.exp(-t * 19);
+        // Darkens with the decay, but only over the top half of its range.
+        const coefficient = 0.34 - 0.12 * Math.min(1, t / 0.34);
+        low += coefficient * (rand() * 2 - 1 - low);
+        data[i] = low * Math.exp(-t * 15);
       }
-      for (const [ms, gain] of [[6, 0.45], [11, 0.34], [19, 0.26], [31, 0.17]]) {
-        const at = Math.floor((rate * ms) / 1000);
-        if (at < length) data[at] += gain * (channel ? -1 : 1);
+      // Early reflections: irregular arrivals through the first 50ms, each a
+      // short burst rather than an impulse, thinning out as the tail takes over.
+      let at = 0.0035 + rand() * 0.002;
+      let gain = 0.5;
+      while (at < 0.05) {
+        const start = Math.floor(at * rate);
+        const span = Math.floor(rate * (0.0004 + rand() * 0.0009));
+        const sign = rand() < 0.5 ? -1 : 1;
+        for (let i = 0; i < span && start + i < length; i++) {
+          // A raised cosine, so the burst has no edge of its own to click on.
+          const shape = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / span);
+          data[start + i] += sign * gain * shape * (rand() * 2 - 1);
+        }
+        at += 0.0012 + rand() * 0.004;
+        gain *= 0.88;
       }
+    }
+    // Normalise to a fixed energy so the wet level means the same thing whatever
+    // the shape of the room, and changing the room does not change the loudness.
+    let energy = 0;
+    for (let c = 0; c < 2; c++) {
+      const data = buffer.getChannelData(c);
+      for (let i = 0; i < length; i++) energy += data[i] * data[i];
+    }
+    const scale = 0.55 / Math.sqrt(energy / length);
+    for (let c = 0; c < 2; c++) {
+      const data = buffer.getChannelData(c);
+      for (let i = 0; i < length; i++) data[i] *= scale;
     }
     return buffer;
   }
@@ -145,9 +193,39 @@ export class DiceAudio {
     wet.gain.value = 0.85;
     room.connect(wet).connect(presence);
 
+    // The tray itself: a fixed set of gentle formants every contact passes
+    // through, wired in series ahead of everything else.
+    //
+    // Most of what you hear when a die lands is not the die, it is the tray, and
+    // the tray is one object — so its colour belongs here, stamped identically on
+    // every contact, rather than being re-synthesised per impact as part of each
+    // voice. Measured over whole rolls this is what moved consecutive contacts
+    // closer together; five attempts at reducing the per-contact randomisation
+    // moved it by nothing at all, because the variation was never there.
+    //
+    // Gentle on purpose. At nearly twice these figures both the likeness and the
+    // pitch scatter got worse, not better: a strong resonance is a box, and a box
+    // rings at its own pitch instead of colouring what happens inside it.
+    const BODY = [
+      { hz: 420, q: 1.9, db: 4.0 },
+      { hz: 780, q: 2.4, db: -3.0 },
+      { hz: 1350, q: 2.0, db: 3.5 },
+      { hz: 3200, q: 2.0, db: -2.5 },
+    ];
+    let bodyIn = presence;
+    for (const f of [...BODY].reverse()) {
+      const filter = context.createBiquadFilter();
+      filter.type = 'peaking';
+      filter.frequency.value = f.hz;
+      filter.Q.value = f.q;
+      filter.gain.value = f.db;
+      filter.connect(bodyIn);
+      bodyIn = filter;
+    }
+
     const master = context.createGain();
     master.gain.value = this.enabled ? 0.8 : 0;
-    master.connect(presence);
+    master.connect(bodyIn);
     master.connect(room);
 
     // Two seconds of white noise, reused for every click.
@@ -155,9 +233,43 @@ export class DiceAudio {
     const data = buffer.getChannelData(0);
     for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
 
+    // Room tone.
+    //
+    // Measured in ten-millisecond windows, both reference recordings sit on a
+    // floor 48 and 65dB under their loudest moment. Ours sat 223dB under it,
+    // which is not a quiet room — it is mathematically nothing. A sequence of
+    // events separated by absolute silence is the most recognisable synthetic
+    // tell there is, and no recording of anything has ever had one.
+    //
+    // So: a bed of filtered noise, far too quiet to hear on its own, present
+    // while the dice are. It is raised by each contact and decays away a couple
+    // of seconds after the last one, because the room is only there to be heard
+    // when something else is making a sound in it — and a page sitting idle
+    // should be properly silent rather than hissing.
+    const bed = context.createBufferSource();
+    const bedBuffer = context.createBuffer(2, context.sampleRate * 3, context.sampleRate);
+    for (let c = 0; c < 2; c++) {
+      const channel = bedBuffer.getChannelData(c);
+      let low = 0;
+      for (let i = 0; i < channel.length; i++) {
+        low += 0.12 * (Math.random() * 2 - 1 - low);
+        channel[i] = low;
+      }
+    }
+    bed.buffer = bedBuffer;
+    bed.loop = true;
+    const bedShape = context.createBiquadFilter();
+    bedShape.type = 'highpass';
+    bedShape.frequency.value = 90;
+    const floor = context.createGain();
+    floor.gain.value = 0;
+    bed.connect(bedShape).connect(floor).connect(master);
+
     this.context = context;
     this.master = master;
     this.noise = buffer;
+    this.floor = floor;
+    this.bed = bed;
   }
 
   /**
@@ -199,6 +311,20 @@ export class DiceAudio {
     // curve lifts the quiet end without flattening the loud end.
     const level = Math.pow(Math.max(0.06, Math.min(1, strength)), 0.55);
     const voice = SURFACES[surface];
+
+    // Bring the room tone up, and leave it decaying. Every contact re-raises it,
+    // so it is continuous through a roll and gone a few seconds after the last
+    // die stops. The bed only starts on the first contact of the session.
+    if (this.floor && this.bed) {
+      if (!this.floorStarted) {
+        this.bed.start(context.currentTime);
+        this.floorStarted = true;
+      }
+      const gain = this.floor.gain;
+      gain.cancelScheduledValues(context.currentTime);
+      gain.setTargetAtTime(0.0016, context.currentTime, 0.03);
+      gain.setTargetAtTime(0, context.currentTime + 0.4, 0.8);
+    }
     const jitter = (amount: number) => 1 + (Math.random() * 2 - 1) * amount;
 
     const placement = context.createStereoPanner();
@@ -208,9 +334,9 @@ export class DiceAudio {
     // One burst of noise excites the whole thing, the way one strike does.
     const source = context.createBufferSource();
     source.buffer = noise;
-    source.playbackRate.value = 0.85 + Math.random() * 0.3;
+    source.playbackRate.value = 0.92 + Math.random() * 0.16;
     // Target -20dB ring for the fundamental; the resonator Q is derived from it.
-    const ring = voice.decay * jitter(0.25) * (0.7 + level * 0.5);
+    const ring = voice.decay * jitter(0.12) * (0.7 + level * 0.5);
 
     // A die does not land once. It comes down on an edge, tips, and drops onto a
     // face, and those contacts are milliseconds apart — that clatter is most of
@@ -218,7 +344,7 @@ export class DiceAudio {
     // excitation is two or three spikes a few milliseconds apart, each quieter
     // than the last, re-striking the same resonators.
     const excite = context.createGain();
-    const burst = 0.005 * jitter(0.35);
+    const burst = 0.005 * jitter(0.2);
     const strikes = 1 + (Math.random() < 0.65 ? 1 : 0) + (Math.random() < 0.35 ? 1 : 0);
     let at = now;
     let force = 1;
@@ -236,7 +362,7 @@ export class DiceAudio {
     // hard rather than soft.
     const edge = context.createBiquadFilter();
     edge.type = 'highpass';
-    edge.frequency.value = 1100 * jitter(0.4);
+    edge.frequency.value = 1100 * jitter(0.15);
     const tick = context.createGain();
     tick.gain.value = voice.tick * level;
     excite.connect(edge).connect(tick).connect(placement);
@@ -258,7 +384,7 @@ export class DiceAudio {
     // instrument — which is exactly what it sounded like. Dice have no tuning:
     // the modes a contact happens to excite depend on where it was struck, so
     // they should differ every time and never resolve into a pitch.
-    const root = (voice.root * 0.5) / Math.max(radius, 0.2) * jitter(0.06);
+    const root = (voice.root * 0.5) / Math.max(radius, 0.2) * jitter(0.04);
     for (const nominal of MODES) {
       // A fixed set of ratios, barely jittered, and a root that hardly moves.
       //
@@ -268,12 +394,17 @@ export class DiceAudio {
       // the same object. Redrawing the modes each time gave every hit a different
       // set of pitches, and a sequence of different pitches is a marimba being
       // played, which is exactly what it sounded like.
-      const ratio = nominal * jitter(0.05);
+      const ratio = nominal * jitter(0.03);
       const hz = Math.min(root * ratio, 15000);
       // Deliberately short and broad. A narrow resonator holds a pitch; a
       // handful of broad ones overlapping read as a body with a colour.
       const t20 = ((ring * 0.75) / Math.pow(ratio, 0.5)) * jitter(0.12);
-      const q = Math.min(Math.max((Math.PI * hz * t20) / 2.303, 3), 90);
+      // Capped hard. The ceiling used to be 90, and die-on-die contacts — the
+      // commonest kind in a roll by a wide margin — were reaching Q 85 at 5.7kHz.
+      // That is a tuning fork. Acrylic has a loss factor around 0.05, which puts
+      // its modes near Q 20 before the tray damps them further, and nothing in a
+      // felt-lined leather box rings narrower than that.
+      const q = Math.min(Math.max((Math.PI * hz * t20) / 2.303, 3), 26);
       const mode = context.createBiquadFilter();
       mode.type = 'bandpass';
       mode.frequency.value = hz;
@@ -283,8 +414,17 @@ export class DiceAudio {
       // its bandwidth f/Q, so restoring the level scales by sqrt(Q/f) — not
       // sqrt(Q), which left the modes fifty times too quiet against the contact
       // noise and collapsed the whole sound into the tick.
+      // The rolloff across the modes, and how much it is allowed to wander.
+      //
+      // At -0.35 the second mode sat 1.83dB under the first while this random
+      // factor spanned +-1.2dB, so which partial carried the pitch flipped from
+      // one contact to the next. Measured over a whole roll, the strongest peak
+      // scattered 66.6% about its mean where real dice scatter 21-27%: a set of
+      // inharmonic partials with a different winner every strike is a bell being
+      // struck in different places. Steeper here, and tighter there, keeps the
+      // fundamental in front where a real body keeps it.
       gain.gain.value =
-        voice.ring * level * Math.pow(ratio, -0.35) * (0.85 + Math.random() * 0.3) *
+        voice.ring * level * Math.pow(ratio, -0.85) * (0.92 + Math.random() * 0.16) *
         Math.sqrt(q / hz) * 150;
       excite.connect(mode).connect(gain).connect(placement);
     }
@@ -293,15 +433,20 @@ export class DiceAudio {
     // under the strike, because a sine at this level carries far more energy than
     // a few milliseconds of top end and will bury it given the chance — measured
     // at zero percent of a floor impact's energy above 6kHz before this came down.
-    if (level > 0.3) {
+    // Faded in rather than switched on at a threshold. `level > 0.3` meant one
+    // contact carried a whole extra oscillator and the next did not, so
+    // neighbouring taps in the same roll differed by more than a hard hit differs
+    // from a soft one.
+    const weight = Math.min(1, Math.max(0, (level - 0.24) / 0.3));
+    if (weight > 0.02) {
       const thump = context.createOscillator();
       thump.type = 'sine';
-      thump.frequency.setValueAtTime(320 + Math.random() * 80, now);
+      thump.frequency.setValueAtTime(320 + Math.random() * 50, now);
       thump.frequency.exponentialRampToValueAtTime(150, now + 0.1);
       const thumpGain = context.createGain();
       thumpGain.gain.setValueAtTime(0, now);
-      thumpGain.gain.linearRampToValueAtTime(0.28 * level * voice.body, now + 0.006);
-      thumpGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.04 * jitter(0.25));
+      thumpGain.gain.linearRampToValueAtTime(0.28 * weight * level * voice.body, now + 0.006);
+      thumpGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.04 * jitter(0.15));
       thump.connect(thumpGain).connect(master);
       thump.start(now);
       thump.stop(now + 0.16);

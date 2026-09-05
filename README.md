@@ -429,20 +429,22 @@ construction, only by measurement.
 
 Every impact is synthesised: a few milliseconds of noise for the contact itself,
 striking a fixed bank of resonators on inharmonic ratios, which then ring on their
-own, with a low sine underneath for the die's mass, all of it playing into a small
-generated room. The contact is two or three
-spikes milliseconds apart rather than one, because a die lands on an edge and tips
-onto a face. Higher modes ring down
-faster, which is why a struck object brightens for an instant and then darkens as
-it rings out. Each impact draws its own root, ratios, mode count, amplitudes and
-decays, and a big die rings lower than a small one. Nothing is sampled.
+own, with a low sine underneath for the die's mass. That goes through the tray —
+a fixed set of gentle formants every contact shares, because most of what you hear
+when a die lands is the tray and the tray is one object — and then into a small
+generated room, over a bed of room tone. The contact is two or three spikes
+milliseconds apart rather than one, because a die lands on an edge and tips onto a
+face. Higher modes ring down faster, which is why a struck object brightens for an
+instant and then darkens as it rings out. Nothing is sampled.
 
-It took nine passes to get there, and every fault is worth recording. Each was
+It took twelve passes to get there, and every fault is worth recording. Each was
 audible before it was measurable; two came from a correct calculation applied to
 the wrong case; two more came from assumptions about what real dice sound like
 that the recordings disproved; one was not in the synthesis but in the bus it was
 played through; one was not in the sound but in when the sounds were scheduled;
-and the last was not in the sound at all but in the silence after it.
+one was not in the sound at all but in the silence after it; and the last three
+were invisible to every check in the suite because they are properties of a roll
+rather than of an impact, and every check rendered impacts one at a time.
 
 **Muffled and same-y.** It began as a single bandpass at 1.5-4kHz with a Q of
 about one. A filter that shape has essentially nothing above 8kHz, so the sound
@@ -548,6 +550,61 @@ measured 0.00%.
 I had also nearly built this two rounds earlier and talked myself out of it,
 because the recordings measure 1.000 stereo correlation. That was the wrong
 inference: it says they are mono, not that they are dry.
+
+**Metallic, low bit depth, and a bit under water.** Three complaints at once, and
+none of them visible to anything in the suite, because every check in it renders
+impacts *one at a time, into their own context*. A roll is thirty contacts in two
+seconds, both reference recordings are rolls, and that comparison had never been
+made. `npm run sound:roll` makes it: it steps a real physics throw, keeps every
+contact the solver reports with the time it was heard, renders the whole sequence,
+and puts it beside a recording of a real one. Three faults fell out of the first
+run, one for each complaint.
+
+*Metallic* was two things, both measurable once a roll was the unit. The strongest
+spectral peak of each contact scattered 66.6% about its mean, where the recordings
+scatter 21.0% and 26.6%. Modes one and two sat 1.83dB apart while the random
+per-mode gain spanned ±1.2dB, so which partial carried the pitch flipped from one
+contact to the next; across the three surfaces the root moved 782→1243Hz on top of
+that. A set of inharmonic partials with a different winner every strike is a bell
+struck in different places. The rolloff across the modes went from `ratio^-0.35`
+to `ratio^-0.85` and the random factor from ±1.2dB to ±0.7dB, so the fundamental
+stays in front. The second thing: die-on-die is the commonest contact in a roll by
+a wide margin — 14 to 16 of every 25 — and it was running at Q 40 to 85. Q 85 at
+5.7kHz is a tuning fork. Acrylic's loss factor puts its modes near Q 20 before a
+felt-lined tray damps them further, and the ceiling is now 26. Scatter came to
+21.4% and the pitch centre from 1745Hz to 1131Hz, against 1299Hz and 832Hz.
+
+*Under water* was the room I had just built. Its tail ran through a one-pole whose
+cutoff closed from 2.1kHz to 380Hz across the decay — a wah pedal shutting on every
+impact, which is exactly what hearing something through water sounds like. It now
+closes to 1.4kHz and stops. Its four early reflections were also single samples,
+and one sample at 0.45 is a full-bandwidth impulse, about the most synthetic object
+that can exist in a buffer; they are now dozens of short filtered bursts at
+irregular times, which is what a table actually scatters. The IR is normalised, so
+the wet level means the same thing if the room is ever changed again.
+
+*Low bit depth* was the best find of the three, and it was one number. In 10ms
+windows, both recordings sit on a floor 33dB and 27dB under their loudest moment,
+measured between contacts. Ours sat 222dB under it — which is not a quiet room, it
+is mathematically nothing. A sequence of events separated by absolute silence is a
+tell no recording of anything has ever had. There is now a bed of filtered noise,
+far too quiet to hear on its own, raised by each contact and decaying away a couple
+of seconds after the last, so the gaps in a roll have a room in them and an idle
+page is still properly silent. The floor now sits 59-77dB under the peak and never
+reaches zero.
+
+One measurement in that run stayed stubborn and is worth recording as unfinished.
+Consecutive contacts in our rolls are 0.72 alike where the recordings are 0.84 and
+0.94. Five separate attempts at the obvious cause moved it by nothing at all —
+tightening every per-contact jitter, compressing the per-surface parameters,
+dropping the multi-strike to one, fixing the noise draw per surface — which is how
+I know the variation was never in any of them. What did move it was giving the tray
+a fixed voice of its own, on the master bus, shared by every contact: a real roll
+puts everything through one table, and ours was re-synthesising the body per
+impact. That took it from 0.68 to 0.72. Doubling the strength of those formants
+made both the likeness and the pitch scatter *worse*, because a strong resonance is
+a box and a box rings at its own pitch rather than colouring what happens inside
+it. The remaining gap is real and I do not yet know what it is.
 
 **High and thin.** Those modes were pitched at 3.6-5.2kHz, which left 0.6% of every
 impact's energy below 2.5kHz and 71% above it — all edge, no object. The modes
@@ -655,6 +712,7 @@ the wrong thing:
 | `npm run verify:sound` | the impacts sit where real dice recordings do |
 | `npm run sound:reference` | measure a real recording the same way, for comparison |
 | `npm run sound:spectrogram` | print a real impact and one of ours side by side |
+| `npm run sound:roll` | render a whole physics roll beside a recording of one |
 | `npm run verify:flakes` | the sparkle does not jump as the camera closes in |
 | `npm run verify:build` | the built site runs from a sub-path, with no 404s |
 | `npm run verify:pwa` | the installed app boots and rolls with the network cut |
