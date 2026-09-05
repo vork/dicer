@@ -414,10 +414,11 @@ faster, which is why a struck object brightens for an instant and then darkens a
 it rings out. Each impact draws its own root, ratios, mode count, amplitudes and
 decays, and a big die rings lower than a small one. Nothing is sampled.
 
-It took six passes to get there, and every fault is worth recording. Each was
-audible before it was measurable, two came from a correct calculation applied to
-the wrong case, and two more came from assumptions about what real dice sound like
-that the recordings simply disproved.
+It took seven passes to get there, and every fault is worth recording. Each was
+audible before it was measurable; two came from a correct calculation applied to
+the wrong case; two more came from assumptions about what real dice sound like
+that the recordings simply disproved; and the last one was not in the synthesis at
+all but in the bus it was played through.
 
 **Muffled and same-y.** It began as a single bandpass at 1.5-4kHz with a Q of
 about one. A filter that shape has essentially nothing above 8kHz, so the sound
@@ -463,6 +464,22 @@ face, so the excitation is two or three spikes a few milliseconds apart, each
 quieter than the last, re-striking the same resonators. That clatter is a good
 part of what separates dice on a table from something being struck.
 
+**Quantised, like low bit depth.** Which is distortion, and it was on the bus
+rather than in the synthesis. The impacts ran through a DynamicsCompressor with a
+-14dB threshold and a 10dB knee, and a single impact peaks at about -14dB — so
+every one of them landed five decibels inside the knee. With a 6ms attack and a
+120ms release, and contacts arriving every twenty to ninety milliseconds, it
+engaged on every impact and never let go: it pumped continuously and chewed the
+transients it was supposed to be protecting.
+
+It is a tanh soft clipper now, which has unity slope at the origin and so is a
+straight wire at the levels dice actually reach — 0.4dB at a single impact's peak
+— bending only when several land at once. Oversampled 4x, because a waveshaper
+folds whatever it distorts back down the spectrum and that aliasing is itself the
+digital grit being avoided. Removing the compression also let the peaks back up
+from 0.20 to 0.37 and shortened the measured decay by several milliseconds, which
+is the tail it had been smearing.
+
 **High and thin.** Those modes were pitched at 3.6-5.2kHz, which left 0.6% of every
 impact's energy below 2.5kHz and 71% above it — all edge, no object. The modes
 moved down to 950-1550Hz, the contact noise's high-pass came down with them, the
@@ -491,7 +508,7 @@ good corrected both of the assumptions I had been tuning against:
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | freesound rpg dice | 11.9% | 84.6% | 3.4% | 0.0% | 1383Hz | 0.004 | 24ms | 0.901 |
 | pixabay dice 142528 | 10.6% | 47.8% | 38.9% | 4.7% | 2500Hz | 0.090 | 38ms | 0.913 |
-| this | 10.8% | 52.8% | 17.0% | 4.6% | 2414Hz | 0.088 | 39ms | 0.890 |
+| this | 9.9% | 51.9% | 16.6% | 4.6% | 2417Hz | 0.082 | 26-30ms | 0.886 |
 
 I had blamed the 2.5-5.5kHz band, because the version reported as uncomfortable
 had 44% of its energy there. One of the recordings has 39% in that band and sounds

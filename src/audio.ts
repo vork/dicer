@@ -26,8 +26,8 @@ const SURFACES: Record<
   { root: number; decay: number; tick: number; ring: number; body: number }
 > = {
   floor: { root: 880, decay: 0.016, tick: 0.18, ring: 0.85, body: 0.55 },
-  wall: { root: 1050, decay: 0.019, tick: 0.25, ring: 0.90, body: 0.40 },
-  dice: { root: 1400, decay: 0.021, tick: 0.35, ring: 1.00, body: 0.22 },
+  wall: { root: 1050, decay: 0.022, tick: 0.25, ring: 0.90, body: 0.40 },
+  dice: { root: 1400, decay: 0.027, tick: 0.35, ring: 1.00, body: 0.22 },
 };
 export class DiceAudio {
   private context: AudioContext | null = null;
@@ -55,20 +55,32 @@ export class DiceAudio {
     if (!Ctor) return;
     const context = new Ctor();
 
-    // Dice make a lot of small taps and a few hard cracks. Pushing the quiet end
-    // up far enough to hear leaves the loud end clipping when several land at
-    // once, so the bus runs through a limiter and the levels can sit high.
-    // Deliberately not a fast limiter. At a 3ms attack it was closing over the
-    // strike itself — the two or three milliseconds of top end that make a die
-    // sound hard — and levelling exactly what should stand out. Opening more
-    // slowly lets the transient through and still catches the sustain behind it.
-    const limiter = context.createDynamicsCompressor();
-    limiter.threshold.value = -14;
-    limiter.knee.value = 10;
-    limiter.ratio.value = 5;
-    limiter.attack.value = 0.006;
-    limiter.release.value = 0.12;
-    limiter.connect(context.destination);
+    // A soft saturator, not a compressor.
+    //
+    // This was a DynamicsCompressor at a -14dB threshold with a 10dB knee, and
+    // impacts peak at about -14dB — so every single one landed five decibels
+    // inside the knee. With a 6ms attack and a 120ms release, and contacts
+    // arriving every twenty to ninety milliseconds, it engaged on every impact
+    // and never let go: it pumped continuously and chewed the very transients it
+    // was there to protect, which is what made the dice sound crunched and
+    // quantised.
+    //
+    // tanh has unity slope at the origin, so it is a straight wire at the levels
+    // the dice actually reach — 0.1dB at a single impact's peak — and bends only
+    // when several land at once. Oversampling matters: a waveshaper folds
+    // whatever it distorts back down the spectrum, and that aliasing is itself
+    // exactly the digital grit being avoided here.
+    const saturator = context.createWaveShaper();
+    const curve = new Float32Array(2048);
+    for (let i = 0; i < curve.length; i++) {
+      // Plain tanh: slope one at the origin, so it is a straight wire for
+      // anything small, bending only as the sum approaches full scale. A single
+      // impact peaks near 0.2, where this costs 0.1dB.
+      curve[i] = Math.tanh((i / (curve.length - 1)) * 2 - 1);
+    }
+    saturator.curve = curve;
+    saturator.oversample = '4x';
+    saturator.connect(context.destination);
 
     // A gentle dip where the ear is sharpest. 2.5-5.5kHz is the band that turns a
     // click from present into piercing, and dice put a lot of energy there — half
@@ -82,7 +94,7 @@ export class DiceAudio {
     // in this band; with them moved down, the same cut on top took the
     // articulation out as well as the edge.
     presence.gain.value = -2.5;
-    presence.connect(limiter);
+    presence.connect(saturator);
 
     const master = context.createGain();
     master.gain.value = this.enabled ? 0.8 : 0;
