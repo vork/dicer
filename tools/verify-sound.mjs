@@ -138,6 +138,16 @@ try {
     const mid = share(700, 2500);
     const harsh = share(2500, 5500);
     const air = share(5500, 22000);
+    // One number for "how high does this sit", and the one that compares most
+    // directly against a real recording.
+    let num = 0;
+    let den = 0;
+    for (const b of bands) {
+      const centre = Math.sqrt(b.lo * b.hi);
+      num += b.energy * centre;
+      den += b.energy;
+    }
+    const centroid = den > 0 ? num / den : 0;
     // Log magnitudes make the comparison about shape rather than loudness.
     const shape = bands.map((b) => Math.log10(b.energy / total + 1e-9));
     const peak = Math.max(...r.samples.map(Math.abs));
@@ -155,7 +165,7 @@ try {
     const loudest = Math.max(...env);
     const at = env.findIndex((v, i) => i > env.indexOf(loudest) && v < loudest * 0.1);
     const decayMs = at < 0 ? Infinity : (at * win * 1000) / 44100;
-    return { ...r, bright: high / total, shape, peak, decayMs, body, mid, harsh, air };
+    return { ...r, bright: high / total, shape, peak, decayMs, body, mid, harsh, air, centroid };
   });
 
   // Correlation, not raw cosine. Log magnitudes are all negative numbers of
@@ -205,48 +215,57 @@ try {
   console.log(`    0.7-2.5kHz mid     ${(mean(analysed.map((a) => a.mid)) * 100).toFixed(1)}%`);
   console.log(`    2.5-5.5kHz harsh   ${(mean(analysed.map((a) => a.harsh)) * 100).toFixed(1)}%`);
   console.log(`    5.5kHz+    air     ${(mean(analysed.map((a) => a.air)) * 100).toFixed(1)}%`);
+  const centroid = mean(analysed.map((a) => a.centroid));
+  const below = mean(analysed.map((a) => a.body + a.mid));
+  const above = mean(analysed.map((a) => a.harsh + a.air));
+  console.log(`\n  spectral centroid              ${centroid.toFixed(0)}Hz`);
+  console.log(`  below 2.5kHz vs above          ${(below / Math.max(above, 1e-6)).toFixed(1)}x`);
+  console.log('');
+  console.log('  two real recordings, measured the same way:');
+  console.log('    freesound rpg dice   body 11.9  mid 84.6  harsh  3.4  air 0.0   1383Hz  24ms');
+  console.log('    pixabay dice 142528  body 10.6  mid 47.8  harsh 38.9  air 4.7   2500Hz  38ms');
   console.log(`\n  energy above 6kHz, overall     ${(bright * 100).toFixed(1)}%`);
   console.log(`  likeness of two like impacts   ${mean(sameKind).toFixed(3)}  (1.000 = identical)`);
 
-  // What this is really asking is not "is it bright" but "is it comfortable".
-  // Chasing brightness alone is how it ended up at 49% of its energy in the
-  // 2.5-5.5kHz band, which is where hearing is sharpest, with nothing at all
-  // between 150Hz and 2.5kHz — high and thin, and tiring to listen to. So the
-  // shape is bounded from both sides.
+  // The bounds below come from measuring two real dice recordings the user
+  // picked out as pleasant (npm run sound:reference), not from theory — and the
+  // measurement corrected two of my own assumptions.
+  //
+  // I had assumed energy in 2.5-5.5kHz was the problem, because the version that
+  // was reported as uncomfortable had 44% of its energy there. But one of the
+  // references has 39% in that band and sounds fine. What that version actually
+  // lacked was anything underneath: 0.6% below 2.5kHz, against 58% and 96% in the
+  // two recordings. It was all edge and no object. So the bound is on the
+  // balance, not on the bright band alone.
+  //
+  // I had also required energy above 5.5kHz, on the theory that a hard little
+  // object is mostly top end. One of the references has none at all — 0.0% — and
+  // is perfectly pleasant, so that requirement was wrong and is gone.
   const body = mean(analysed.map((a) => a.body));
   const mid = mean(analysed.map((a) => a.mid));
-  const harsh = mean(analysed.map((a) => a.harsh));
-  const air = mean(analysed.map((a) => a.air));
 
-  // Piercing: too much where the ear is most sensitive.
-  if (harsh > 0.35) {
-    console.error(`\n  FAIL ${(harsh * 100).toFixed(0)}% of the energy sits in 2.5-5.5kHz, where the ear is sharpest`);
+  if (below / Math.max(above, 1e-6) < 1) {
+    console.error(`\n  FAIL more energy above 2.5kHz than below it — both recordings are the other way round, by 1.3x and 28x`);
     failed = true;
   }
-  // Thin: a die with no body under 2.5kHz is all edge and no object.
   if (body + mid < 0.25) {
     console.error(`\n  FAIL only ${((body + mid) * 100).toFixed(0)}% sits below 2.5kHz — that is thin`);
     failed = true;
   }
-  // Muffled: the original single-bandpass version measured 0.4% up here.
-  if (air < 0.04) {
-    console.error(`\n  FAIL only ${(air * 100).toFixed(1)}% of the energy is above 5.5kHz — that is the muffled sound`);
-    failed = true;
-  }
-  // Boomy: the low sine carries far more energy than anything else and will take
-  // the whole sound over given the chance.
   if (body > 0.5) {
     console.error(`\n  FAIL ${(body * 100).toFixed(0)}% sits in 150-700Hz — the thump has swallowed the strike`);
     failed = true;
   }
-  // Two impacts of the same kind should still differ audibly. The limit sits
-  // between the version that reused one filter shape every time (0.99) and this
-  // one; the same material struck the same way twice is meant to be similar,
-  // just not identical.
+  // Both recordings sit between 1.4kHz and 2.5kHz.
+  if (centroid < 900 || centroid > 3200) {
+    console.error(`\n  FAIL centroid at ${centroid.toFixed(0)}Hz — the recordings sit at 1383 and 2500`);
+    failed = true;
+  }
   if (mean(sameKind) > 0.95) {
     console.error(`\n  FAIL two impacts of the same kind are ${mean(sameKind).toFixed(3)} alike — every contact sounds the same`);
     failed = true;
   }
+  // The recordings fall 20dB in 24ms and 38ms. A die is a click.
   const slow = analysed.filter((a) => !Number.isFinite(a.decayMs) || a.decayMs > 220);
   if (slow.length) {
     console.error(`\n  FAIL ${slow.length} impact(s) ring on past 220ms — that is a chime, not a die`);
@@ -256,7 +275,7 @@ try {
     console.error('\n  FAIL an impact clips');
     failed = true;
   }
-  if (!failed) console.log('\nthe impacts are bright, and no two of them are alike');
+  if (!failed) console.log('\nthe impacts sit where the real recordings do, and no two are alike');
 } catch (error) {
   console.error(error);
   failed = true;

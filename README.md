@@ -430,14 +430,12 @@ through it the whole time, and noise held through a filter is a hiss, not a
 strike. Struck solids ring down as sinusoids, so the modes became sinusoids and
 the noise went back to being the moment of contact and nothing more.
 
-**High and thin.** Those modes were pitched at 3.6-5.2kHz, which put 44% of every
-impact's energy into 2.5-5.5kHz — the band where human hearing is sharpest, and so
-the band where a click stops being present and starts being piercing — with 0.6%
-below 2.5kHz. High and thin, exactly. The modes moved down to 950-1550Hz, the
-contact noise's high-pass came down with them, the low sine moved up to 320-150Hz
-so it joins onto the body instead of thudding somewhere underneath it, and a
-couple of dB come out at 3.8kHz. That is 81% of the energy below 2.5kHz now,
-against 0.6% before.
+**High and thin.** Those modes were pitched at 3.6-5.2kHz, which left 0.6% of every
+impact's energy below 2.5kHz and 71% above it — all edge, no object. The modes
+moved down to 950-1550Hz, the contact noise's high-pass came down with them, the
+low sine moved up to 320-150Hz so it joins onto the body instead of thudding
+somewhere underneath it, and a couple of dB come out at 3.8kHz. That is 78% below
+2.5kHz now, which is where both reference recordings sit.
 
 Contacts are told apart too. Acrylic on felt, on leather and on acrylic sound
 nothing alike, so the physics guesses which happened — neighbours first, that being
@@ -446,14 +444,37 @@ swallows the ring; dice striking each other are the brightest thing in the tray.
 
 `npm run verify:sound` measures all of this rather than describing it. It renders
 impacts through the real class into an `OfflineAudioContext` and reports where the
-energy sits across four bands, how alike two impacts of the same kind are, and how
-long each takes to fall 20dB. The bands are bounded from both sides, because
-chasing any single number is what produced two of the faults above: too much in
-2.5-5.5kHz is piercing, too little below 2.5kHz is thin, too little above 5.5kHz is
-muffled, and too much in 150-700Hz means the thump has swallowed the strike. The
-decay bound guards the other way from the modes — sinusoids ringing long enough to
-sound like a chime rather than a die. These land at 26ms on felt, 25 against the
-wall and 37 between dice.
+energy sits across four bands, the spectral centroid, how alike two impacts of the
+same kind are, and how long each takes to fall 20dB.
+
+What it checks those numbers against is two real dice recordings rather than a
+theory. `npm run sound:reference <file>` measures any recording the same way —
+Chromium decodes it, onsets are picked off the energy envelope so each impact is
+measured on its own, and out come the same bands — so the synthesis has something
+to aim at instead of my opinion. Measuring two that were picked out as sounding
+good corrected both of the assumptions I had been tuning against:
+
+| | body | mid | harsh | air | centroid | -20dB |
+| --- | --- | --- | --- | --- | --- | --- |
+| freesound rpg dice | 11.9% | 84.6% | 3.4% | 0.0% | 1383Hz | 24ms |
+| pixabay dice 142528 | 10.6% | 47.8% | 38.9% | 4.7% | 2500Hz | 38ms |
+| this | 11.0% | 66.7% | 5.9% | 5.3% | 2120Hz | 26-40ms |
+
+I had blamed the 2.5-5.5kHz band, because the version reported as uncomfortable
+had 44% of its energy there. One of the recordings has 39% in that band and sounds
+fine. What that version actually lacked was anything underneath it — 0.6% below
+2.5kHz, against 58% and 96% in the recordings. It was all edge and no object, and
+the bound belongs on the balance rather than on the bright band alone.
+
+I had also required energy above 5.5kHz on the theory that a hard little object is
+mostly top end. One of the recordings has none at all, 0.0%, and is perfectly
+pleasant. That requirement was wrong and is gone.
+
+What remains is bounded by what the recordings actually do: at least as much energy
+below 2.5kHz as above (they are 1.3x and 28x that way; the uncomfortable version
+was 0.008x), a centroid in their range, not so much in 150-700Hz that the thump has
+swallowed the strike, and a decay short enough to be a click rather than a chime —
+they fall 20dB in 24ms and 38ms.
 
 Two of its own measurements were wrong first, and both would have sent me chasing
 the wrong thing:
@@ -485,7 +506,8 @@ the wrong thing:
 | `npm run verify:physics` | settle, containment and distribution over many rolls |
 | `npm run verify:pairs` | two dice in one throw land independently of each other |
 | `npm run verify:audio` | impacts make sound, and the toggle silences and restores it |
-| `npm run verify:sound` | the impacts are bright, and no two are alike |
+| `npm run verify:sound` | the impacts sit where real dice recordings do |
+| `npm run sound:reference` | measure a real recording the same way, for comparison |
 | `npm run verify:flakes` | the sparkle does not jump as the camera closes in |
 | `npm run verify:build` | the built site runs from a sub-path, with no 404s |
 | `npm run verify:pwa` | the installed app boots and rolls with the network cut |
