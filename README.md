@@ -406,14 +406,15 @@ construction, only by measurement.
 ## The sound
 
 Every impact is synthesised: a few milliseconds of noise for the contact itself,
-then the body ringing after it as three or four decaying sinusoids on inharmonic
-ratios, with a low sine underneath for the die's mass. Higher modes die faster,
-which is why a struck object brightens for an instant and then darkens as it rings
-out. Each impact draws its own root, ratios, mode count, amplitudes and decays,
-and a big die rings lower than a small one. Nothing is sampled.
+striking three or four resonators tuned to inharmonic ratios, which then ring on
+their own, with a low sine underneath for the die's mass. Higher modes ring down
+faster, which is why a struck object brightens for an instant and then darkens as
+it rings out. Each impact draws its own root, ratios, mode count, amplitudes and
+decays, and a big die rings lower than a small one. Nothing is sampled.
 
-It took four passes to get there, and each fault is worth recording because each
-one was audible before it was measurable.
+It took five passes to get there, and every fault is worth recording, because each
+was audible before it was measurable and two of them came from a correct
+calculation applied to the wrong case.
 
 **Muffled and same-y.** It began as a single bandpass at 1.5-4kHz with a Q of
 about one. A filter that shape has essentially nothing above 8kHz, so the sound
@@ -422,13 +423,27 @@ the same kind measured 0.99 alike. The only things varying were the centre
 frequency by a few hundred hertz and the noise buffer's read offset, neither of
 which changes a timbre.
 
-**Artificial.** The replacement rang its modes by holding noise through high-Q
-bandpass filters, and still sounded synthetic. A bandpass biquad at 4kHz with a Q
-of 20 rings for about Q/(pi*f) — under two milliseconds. None of the forty to
-ninety it appeared to last came from the resonator; it came from noise being fed
-through it the whole time, and noise held through a filter is a hiss, not a
-strike. Struck solids ring down as sinusoids, so the modes became sinusoids and
-the noise went back to being the moment of contact and nothing more.
+**Artificial.** The replacement rang its modes by holding noise through bandpass
+filters for the whole of the ring, and noise held through a filter is a hiss, not
+a strike. I concluded the filters could not ring at all — a bandpass biquad at
+4kHz with a Q of 20 decays in about Q/(pi*f), under two milliseconds — and
+replaced them with sine oscillators.
+
+**Ping-y, like digital beeps.** Which is what a bank of pure sine tones is. The
+arithmetic above was right but I drew the wrong conclusion from it: a resonator's
+ring is T20 = 2.303 * Q / (pi * f), so it is short at 4kHz *because 4kHz is high*.
+Once the modes came down to 950-1550Hz for the fault below, the same formula gives
+25-38ms at Q 32-80 — exactly the decay the reference recordings have. So the modes
+are resonators again, struck by a burst lasting a few milliseconds and then left
+to ring on their own. That keeps the pitch of a mode without the purity of a sine,
+and the noise stays what it should be: the moment of contact.
+
+Sizing them exposed one more error. A narrow resonator takes a bite out of a
+broadband strike proportional to its bandwidth, f/Q — so restoring the level means
+scaling by sqrt(Q/f), not by sqrt(Q). With the wrong one the modes came out about
+fifty times too quiet against the wideband contact noise and the whole sound
+collapsed into the tick: 7% of its energy in the mid band, 35% above 5.5kHz, a
+centroid of 4.9kHz.
 
 **High and thin.** Those modes were pitched at 3.6-5.2kHz, which left 0.6% of every
 impact's energy below 2.5kHz and 71% above it — all edge, no object. The modes
@@ -458,7 +473,7 @@ good corrected both of the assumptions I had been tuning against:
 | --- | --- | --- | --- | --- | --- | --- |
 | freesound rpg dice | 11.9% | 84.6% | 3.4% | 0.0% | 1383Hz | 24ms |
 | pixabay dice 142528 | 10.6% | 47.8% | 38.9% | 4.7% | 2500Hz | 38ms |
-| this | 11.0% | 66.7% | 5.9% | 5.3% | 2120Hz | 26-40ms |
+| this | 10.7% | 64.0% | 9.5% | 1.5% | 1861Hz | 30-35ms |
 
 I had blamed the 2.5-5.5kHz band, because the version reported as uncomfortable
 had 44% of its energy there. One of the recordings has 39% in that band and sounds
