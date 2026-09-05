@@ -36,6 +36,7 @@
       const report = [];
       const problems = [];
       const perchDetail = [];
+      const escapeDetail = [];
 
       /** Hands the event loop back so the page stays inspectable mid-run. */
       const yieldToHost = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -57,13 +58,18 @@
         let escaped = false;
         for (const die of world.dice) {
           const t = die.body.translation();
-          if (
-            Math.abs(t.x) > TRAY.innerWidth / 2 + 0.6 ||
-            Math.abs(t.z) > TRAY.innerDepth / 2 + 0.6 ||
-            t.y < TRAY.floorY - 0.3 ||
-            t.y > TRAY.floorY + TRAY.wallHeight * 2
-          ) {
+          const over = [];
+          if (Math.abs(t.x) > TRAY.innerWidth / 2 + 0.6) over.push('x');
+          if (Math.abs(t.z) > TRAY.innerDepth / 2 + 0.6) over.push('z');
+          if (t.y < TRAY.floorY - 0.3) over.push('below the floor');
+          if (t.y > TRAY.floorY + TRAY.wallHeight * 2) over.push('above the walls');
+          if (over.length) {
             escaped = true;
+            escapeDetail.push(
+              `${die.type} ended at x ${t.x.toFixed(2)} y ${t.y.toFixed(2)} z ${t.z.toFixed(2)} ` +
+                `(out on ${over.join(', ')}; the inside is ${(TRAY.innerWidth / 2).toFixed(2)} ` +
+                `by ${(TRAY.innerDepth / 2).toFixed(2)} from ${TRAY.floorY.toFixed(2)})`,
+            );
           }
         }
 
@@ -318,12 +324,12 @@
 
       // --- a full pool at the UI's cap, the heaviest case for contacts, and
       // deliberately duplicate-heavy since that is how people build a pool ---
-      if (!only && !pairs) {
+      if ((!only || only === 'pool') && !pairs) {
       const pool = ['d6', 'd6', 'd6', 'd6', 'd20', 'd20', 'd4', 'd8', 'd8', 'd10', 'd12', 'd12'];
       let poolUnsettled = 0;
       let poolEscapes = 0;
       let poolSlowest = 0;
-      const poolTrials = Math.max(20, Math.floor(trials / 4));
+      const poolTrials = only === 'pool' ? trials : Math.max(20, Math.floor(trials / 4));
       for (let i = 0; i < poolTrials; i++) {
         // Every trial: a dozen dice in one throw is slow enough that even a
         // handful between yields can outlast the driver's patience.
@@ -347,6 +353,7 @@
       }
 
       if (perchDetail.length) report.push('', 'dice that did not rest flat:', ...perchDetail.map((d) => `  ${d}`));
+      if (escapeDetail.length) report.push('', 'dice that ended outside the tray:', ...escapeDetail.map((d) => `  ${d}`));
 
       document.getElementById('out').textContent = report.join('\n');
       window.__result = { report, problems };

@@ -360,6 +360,28 @@ wired back to the nominal dimensions. Doing exactly that is how I know it works:
 78 sight lines all overhang, worst 0.226 at the corner diagonal, against 0.000 as
 it stands.
 
+The walls had the opposite problem at the other end. They stand far taller than the
+leather — the extra height is invisible, and it stops a hard throw leaving the
+world — but a wall that stops has a top, and a top is a ledge. A die that came down
+on one stayed there: parked at y 7.71 beside a tray whose rim ends at 2.3, floating
+in mid-air next to the board. The walls now run the whole way up to the backstop
+ceiling and overlap it, so the inside of the tray has no ledge at any height.
+Catching a die that landed on the rim would have been the smaller change, and would
+have left the ledge there for the next thing to find.
+
+Finding it at all was the harder half. It surfaced as `escapes 1` in one run of
+sixty pool rolls and then would not come back — three more runs of sixty were
+clean, which reads exactly like a fluke and is the point at which it is tempting
+to move on. It is about one twelve-die roll in five hundred: rare enough to
+survive any number of sixty-roll runs, common enough that someone rolling a full
+pool will meet it. So `--only pool` exists to run the expensive case on its own,
+hundreds of times, without also paying for 1440 single-die rolls — 1/400, then
+1/500, which is a rate rather than a rumour. And the harness now prints where an
+escaped die actually ended up, because turning "1/500 rolls ended outside the tray"
+into a coordinate cost a whole extra run, and the coordinate was the entire
+diagnosis: x and z inside the wall's own footprint, y one d6 inradius above its
+top.
+
 Where the close-up puts the dice is measured, not assumed. The app reads the gap
 between the bottom of the flashed total and the top of the controls and hands the
 camera that band; the camera frames the dice to fit inside it. That gap is a very
@@ -407,19 +429,20 @@ construction, only by measurement.
 
 Every impact is synthesised: a few milliseconds of noise for the contact itself,
 striking a fixed bank of resonators on inharmonic ratios, which then ring on their
-own, with a low sine underneath for the die's mass. The contact is two or three
+own, with a low sine underneath for the die's mass, all of it playing into a small
+generated room. The contact is two or three
 spikes milliseconds apart rather than one, because a die lands on an edge and tips
 onto a face. Higher modes ring down
 faster, which is why a struck object brightens for an instant and then darkens as
 it rings out. Each impact draws its own root, ratios, mode count, amplitudes and
 decays, and a big die rings lower than a small one. Nothing is sampled.
 
-It took eight passes to get there, and every fault is worth recording. Each was
+It took nine passes to get there, and every fault is worth recording. Each was
 audible before it was measurable; two came from a correct calculation applied to
 the wrong case; two more came from assumptions about what real dice sound like
-that the recordings disproved; one was not in the synthesis at all but in the bus
-it was played through; and the last was not in the sound at all but in when the
-sounds were scheduled.
+that the recordings disproved; one was not in the synthesis but in the bus it was
+played through; one was not in the sound but in when the sounds were scheduled;
+and the last was not in the sound at all but in the silence after it.
 
 **Muffled and same-y.** It began as a single bandpass at 1.5-4kHz with a Q of
 about one. A filter that shape has essentially nothing above 8kHz, so the sound
@@ -502,6 +525,30 @@ same step get a couple of milliseconds of scatter on top, because two dice do no
 land in the same microsecond and identical timestamps stack. A roll went from
 twelve contacts to twenty-one, which is the clatter that was missing.
 
+**Still digital, after everything else matched.** Every per-impact statistic was
+by now inside the recordings' range — bands, centroid, flatness, decay, likeness,
+tail, crest factor, stereo correlation — and the sound was still obviously
+synthetic. So instead of adding a ninth statistic, `npm run sound:spectrogram`
+prints a coarse spectrogram of a real impact next to one of ours, laid out over
+time. It was plain in a second: both recordings still have content in every band
+at 96ms, and ours was blank from 56ms. Not quiet — empty.
+
+Nothing physical decays into absolute silence, and that abrupt cut to nothing is
+one of the most recognisable synthetic tells there is. The dice now play into a
+small generated room: four early reflections in the first forty milliseconds over
+an exponentially decaying noise tail that gets progressively darker, because a
+room absorbs the top end long before the bottom. It also fills the gaps between
+contacts, which is what makes a roll sound like it is happening somewhere.
+
+The metric that should have caught this had reported a healthy 22%, because it
+compared everything after 25ms against the strike and was dominated by the 25-40ms
+region where there was plenty. It now looks only at 80-200ms, where the old sound
+measured 0.00%.
+
+I had also nearly built this two rounds earlier and talked myself out of it,
+because the recordings measure 1.000 stereo correlation. That was the wrong
+inference: it says they are mono, not that they are dry.
+
 **High and thin.** Those modes were pitched at 3.6-5.2kHz, which left 0.6% of every
 impact's energy below 2.5kHz and 71% above it — all edge, no object. The modes
 moved down to 950-1550Hz, the contact noise's high-pass came down with them, the
@@ -521,10 +568,16 @@ factor, how much arrives after the strike, the stereo correlation, how alike two
 impacts of the same kind are, and how long each takes to fall 20dB.
 
 That list grew one measure at a time, each added to chase a fault the existing
-ones could not see — and the last fault was invisible to all of them, because
-every one describes a single impact and the problem was in the spacing between
-them. A measurement suite converging on a reference is not the same as being
-right.
+ones could not see. Twice the fault was invisible to all of them at once: a
+suite of per-impact statistics cannot see the spacing between impacts, and a set
+of ratios and averages cannot see a sound stopping dead, because a number
+averaged over a window says nothing about where in the window the energy was.
+
+Both of those were found by looking rather than by measuring — the first by
+logging when contacts were actually scheduled, the second by printing a
+spectrogram beside a real one. A measurement suite converging on a reference is
+not the same as being right; it only means the fault is somewhere the suite does
+not look.
 
 What it checks those numbers against is two real dice recordings rather than a
 theory. `npm run sound:reference <file>` measures any recording the same way —
@@ -589,17 +642,19 @@ the wrong thing:
 | `npm run dev` | dev server |
 | `npm run build` | typecheck + production build |
 | `npm run assets` | regenerate `public/dice/*` from the source GLB |
-| `npm run verify` | all four checks below |
+| `npm run verify` | values, reading, camera and physics |
 | `npm run verify:values` | opposite-face-sum invariant on the tables |
 | `npm run verify:reading` | every slot reads back from every yaw, and pool resolution |
 | `npm run verify:camera` | the reveal frames dice anywhere in the tray, uncropped |
 | `npm run verify:tray` | no die can sink into the wall you can see |
 | `npm run verify:layout` | settled dice land clear of the result and the controls |
 | `npm run verify:physics` | settle, containment and distribution over many rolls |
+| `npm run verify:physics -- --only pool --trials 500` | just the twelve-die pool, for rare containment faults |
 | `npm run verify:pairs` | two dice in one throw land independently of each other |
 | `npm run verify:audio` | impacts make sound, and the toggle silences and restores it |
 | `npm run verify:sound` | the impacts sit where real dice recordings do |
 | `npm run sound:reference` | measure a real recording the same way, for comparison |
+| `npm run sound:spectrogram` | print a real impact and one of ours side by side |
 | `npm run verify:flakes` | the sparkle does not jump as the camera closes in |
 | `npm run verify:build` | the built site runs from a sub-path, with no 404s |
 | `npm run verify:pwa` | the installed app boots and rolls with the network cut |

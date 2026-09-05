@@ -122,10 +122,19 @@ export class DiceWorld {
     // die that rests against a wall.
     const halfWidth = PLAY.halfWidth;
     const halfDepth = PLAY.halfDepth;
-    // Taller than the visible rim: the extra height is invisible and almost never
-    // touched, but it stops a hard throw from launching a die out of the world.
-    const wallHalfHeight = TRAY.wallHeight * 1.6;
     const thickness = 0.5;
+    // A backstop ceiling, well above anything a throw reaches.
+    const ceilingY = TRAY.floorY + 22;
+    // The walls run all the way up to it.
+    //
+    // They used to stop at 1.6x the visible rim, which was enough to contain a
+    // hard throw but left their top faces as a ledge — invisible, since the
+    // leather ends at `wallHeight`, and a die that came down on one stayed
+    // there, apparently floating in mid-air beside the tray. Rare (about one
+    // twelve-die roll in five hundred) but badly wrong when it happened. Sealing
+    // the walls to the ceiling leaves the inside of the tray with no ledge to
+    // land on at any height, so the case cannot arise rather than arising less.
+    const wallHalfHeight = (ceilingY - thickness - TRAY.floorY) / 2;
 
     const staticBody = world.createRigidBody(rapier.RigidBodyDesc.fixed());
 
@@ -187,10 +196,11 @@ export class DiceWorld {
       }
     }
 
-    // Ceiling, purely as a backstop for an extreme throw.
+    // Ceiling, purely as a backstop for an extreme throw. It reaches past the
+    // walls so the two overlap and the box is closed.
     world.createCollider(
       rapier.ColliderDesc.cuboid(halfWidth + 2, thickness, halfDepth + 2)
-        .setTranslation(0, TRAY.floorY + 22, 0)
+        .setTranslation(0, ceilingY, 0)
         .setRestitution(0.05)
         .setFriction(0.7),
       staticBody,
