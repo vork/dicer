@@ -21,9 +21,9 @@ const SURFACES: Record<
   ContactSurface,
   { root: number; q: number; decay: number; tick: number; ring: number; body: number }
 > = {
-  floor: { root: 3600, q: 6, decay: 0.038, tick: 0.55, ring: 0.70, body: 0.55 },
-  wall: { root: 4200, q: 11, decay: 0.055, tick: 0.70, ring: 0.80, body: 0.40 },
-  dice: { root: 5200, q: 20, decay: 0.09, tick: 0.90, ring: 0.95, body: 0.20 },
+  floor: { root: 950, q: 6, decay: 0.038, tick: 1.15, ring: 0.85, body: 0.55 },
+  wall: { root: 1150, q: 11, decay: 0.055, tick: 1.35, ring: 0.90, body: 0.40 },
+  dice: { root: 1550, q: 20, decay: 0.09, tick: 1.65, ring: 1.00, body: 0.22 },
 };
 export class DiceAudio {
   private context: AudioContext | null = null;
@@ -66,9 +66,23 @@ export class DiceAudio {
     limiter.release.value = 0.12;
     limiter.connect(context.destination);
 
+    // A gentle dip where the ear is sharpest. 2.5-5.5kHz is the band that turns a
+    // click from present into piercing, and dice put a lot of energy there — half
+    // of it, before the modes were moved down. Taking a few dB out here is what
+    // separates a sound you can listen to for an hour from one you cannot.
+    const presence = context.createBiquadFilter();
+    presence.type = 'peaking';
+    presence.frequency.value = 3800;
+    presence.Q.value = 1.1;
+    // Only a couple of dB. This was cut much harder when the modes themselves sat
+    // in this band; with them moved down, the same cut on top took the
+    // articulation out as well as the edge.
+    presence.gain.value = -2.5;
+    presence.connect(limiter);
+
     const master = context.createGain();
     master.gain.value = this.enabled ? 0.8 : 0;
-    master.connect(limiter);
+    master.connect(presence);
 
     // Two seconds of white noise, reused for every click.
     const buffer = context.createBuffer(1, context.sampleRate * 2, context.sampleRate);
@@ -154,8 +168,11 @@ export class DiceAudio {
       // Higher modes lose their energy faster, which is why a struck object
       // brightens at the very start and then darkens as it rings out.
       const tau = ring * jitter(0.3) / Math.pow(ratio, 0.7);
+      // The upper modes fall off gently rather than steeply. Steeper left almost
+      // everything on the fundamental, which is warm but boxy — a die needs some
+      // upper-mid to sound articulate, just nowhere near enough to be shrill.
       const loudness =
-        voice.ring * level * Math.pow(ratio, -1.1) * (0.55 + Math.random() * 0.6);
+        voice.ring * level * Math.pow(ratio, -0.75) * (0.55 + Math.random() * 0.6);
       const decay = context.createGain();
       decay.gain.setValueAtTime(0, now);
       decay.gain.linearRampToValueAtTime(loudness, now + 0.0006);
@@ -172,12 +189,12 @@ export class DiceAudio {
     if (level > 0.3) {
       const thump = context.createOscillator();
       thump.type = 'sine';
-      thump.frequency.setValueAtTime((150 + Math.random() * 40) * voice.body, now);
-      thump.frequency.exponentialRampToValueAtTime(58 * voice.body, now + 0.1);
+      thump.frequency.setValueAtTime(320 + Math.random() * 80, now);
+      thump.frequency.exponentialRampToValueAtTime(150, now + 0.1);
       const thumpGain = context.createGain();
       thumpGain.gain.setValueAtTime(0, now);
-      thumpGain.gain.linearRampToValueAtTime(0.38 * level * voice.body, now + 0.006);
-      thumpGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.10 * jitter(0.25));
+      thumpGain.gain.linearRampToValueAtTime(0.30 * level * voice.body, now + 0.006);
+      thumpGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.07 * jitter(0.25));
       thump.connect(thumpGain).connect(master);
       thump.start(now);
       thump.stop(now + 0.16);

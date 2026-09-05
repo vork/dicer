@@ -405,59 +405,69 @@ construction, only by measurement.
 
 ## The sound
 
-Every impact is synthesised: one burst of noise struck through a set of
-resonators, layered with a low sine for the die's mass. Nothing is sampled.
+Every impact is synthesised: a few milliseconds of noise for the contact itself,
+then the body ringing after it as three or four decaying sinusoids on inharmonic
+ratios, with a low sine underneath for the die's mass. Higher modes die faster,
+which is why a struck object brightens for an instant and then darkens as it rings
+out. Each impact draws its own root, ratios, mode count, amplitudes and decays,
+and a big die rings lower than a small one. Nothing is sampled.
 
-It used to be one bandpass filter at 1.5-4kHz with a Q of about one, and that is
-audible as two separate faults. A Q-1 bandpass has essentially nothing above 8kHz,
-so 0.4% of the energy sat above 6kHz — the sound was all body and no strike, which
-is what "muffled" means. And because the filter shape was the same every time, two
-impacts of the same kind measured 0.99 alike: the only things that varied were the
-centre frequency by a few hundred hertz and where the noise buffer was read from,
-neither of which changes the timbre.
+It took four passes to get there, and each fault is worth recording because each
+one was audible before it was measurable.
 
-Now a few milliseconds of noise carry the contact itself — the sharp top end that
-makes a die sound hard — and the body rings after it as three or four decaying
-sinusoids on inharmonic ratios, higher modes dying faster, which is why a struck
-object brightens for an instant and then darkens as it rings out. Each impact
-picks its own root, ratios, mode count, amplitudes and decays, and a big die rings
-lower than a small one.
+**Muffled and same-y.** It began as a single bandpass at 1.5-4kHz with a Q of
+about one. A filter that shape has essentially nothing above 8kHz, so the sound
+was all body and no strike; and because the shape never changed, two impacts of
+the same kind measured 0.99 alike. The only things varying were the centre
+frequency by a few hundred hertz and the noise buffer's read offset, neither of
+which changes a timbre.
 
-Getting there took one more correction. The first attempt rang the modes by
-holding noise through high-Q bandpass filters, and that still sounded synthetic
-for a reason worth writing down: a bandpass biquad at 4kHz with a Q of 20 rings
-for about Q/(pi*f), which is under two milliseconds. None of the forty to ninety
-it appeared to last came from the resonator — it came from noise being fed through
-it the whole time, and noise held through a filter is a hiss, not a strike. Struck
-solids ring down as sinusoids, so the modes are sinusoids, and the noise is back
-to being what it should have been all along: the moment of contact and nothing
-more. Two impacts of the same kind went from 0.89 alike to 0.60 on the same
-measure.
+**Artificial.** The replacement rang its modes by holding noise through high-Q
+bandpass filters, and still sounded synthetic. A bandpass biquad at 4kHz with a Q
+of 20 rings for about Q/(pi*f) — under two milliseconds. None of the forty to
+ninety it appeared to last came from the resonator; it came from noise being fed
+through it the whole time, and noise held through a filter is a hiss, not a
+strike. Struck solids ring down as sinusoids, so the modes became sinusoids and
+the noise went back to being the moment of contact and nothing more.
 
-Contacts are also told apart. Acrylic on felt, on leather and on acrylic sound
-nothing alike, so the physics guesses which happened — neighbours first, since a
-die knocking another die is the rarest and most distinctive of the three — and
-each gets its own voice. Felt swallows the ring; a die struck by another die is
-the brightest thing in the tray. Measured, that is 16% of the energy above 6kHz on
-the floor against 42% between dice, where before all three sat at 0.3%.
+**High and thin.** Those modes were pitched at 3.6-5.2kHz, which put 44% of every
+impact's energy into 2.5-5.5kHz — the band where human hearing is sharpest, and so
+the band where a click stops being present and starts being piercing — with 0.6%
+below 2.5kHz. High and thin, exactly. The modes moved down to 950-1550Hz, the
+contact noise's high-pass came down with them, the low sine moved up to 320-150Hz
+so it joins onto the body instead of thudding somewhere underneath it, and a
+couple of dB come out at 3.8kHz. That is 81% of the energy below 2.5kHz now,
+against 0.6% before.
 
-Two smaller things were burying the strike. The low sine carries far more energy
-than a few milliseconds of top end and will swamp it given the chance — floor
-impacts measured *zero* percent above 6kHz until it came down. And the bus limiter
-attacked in 3ms, which is to say it closed over the transient and levelled the one
-part that was supposed to stand out; it opens more slowly now and catches the
-sustain behind it instead.
+Contacts are told apart too. Acrylic on felt, on leather and on acrylic sound
+nothing alike, so the physics guesses which happened — neighbours first, that being
+the rarest and most distinctive of the three — and each has its own voice. Felt
+swallows the ring; dice striking each other are the brightest thing in the tray.
 
-`npm run verify:sound` measures all of this rather than describing it: it renders
-impacts through the real class into an `OfflineAudioContext` and reports the share
-of energy above 6kHz, how alike two impacts of the same kind are, and how long
-each takes to fall 20dB. That last one guards the opposite failure: sinusoids that
-ring too long stop sounding like plastic and start sounding like a chime. A die is
-a click, and these land at 27ms on felt, 31 against the wall and 42 between dice. Its own first
-version was wrong in a way worth recording — plain cosine similarity between two
-log-magnitude spectra sits above 0.99 no matter how different the sounds, because
-it is measuring the offset they share rather than their shape. Centring each
-spectrum first is what makes the number mean anything.
+`npm run verify:sound` measures all of this rather than describing it. It renders
+impacts through the real class into an `OfflineAudioContext` and reports where the
+energy sits across four bands, how alike two impacts of the same kind are, and how
+long each takes to fall 20dB. The bands are bounded from both sides, because
+chasing any single number is what produced two of the faults above: too much in
+2.5-5.5kHz is piercing, too little below 2.5kHz is thin, too little above 5.5kHz is
+muffled, and too much in 150-700Hz means the thump has swallowed the strike. The
+decay bound guards the other way from the modes — sinusoids ringing long enough to
+sound like a chime rather than a die. These land at 26ms on felt, 25 against the
+wall and 37 between dice.
+
+Two of its own measurements were wrong first, and both would have sent me chasing
+the wrong thing:
+
+- Plain cosine similarity between two log-magnitude spectra sits above 0.99
+  however different the sounds are, because it measures the offset they share
+  rather than their shape. Centring each spectrum first is what makes the number
+  mean anything.
+- The spectrum was windowed with a symmetric Hann, which is zero at both ends —
+  and an impact starts at sample zero, so it multiplied the contact noise by about
+  0.002 and erased the one part of the sound it was meant to be measuring. It
+  reported 0.3% of the energy above 5.5kHz for a sound with an obvious top end.
+  Half a Hann, full weight at the start and tapering to nothing at the end, is the
+  right shape for something that begins loud and decays.
 
 ## Tooling
 

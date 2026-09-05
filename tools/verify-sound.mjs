@@ -62,8 +62,16 @@ function spectrum(samples, sampleRate) {
   const re = new Float64Array(n);
   const im = new Float64Array(n);
   const take = Math.min(n, samples.length);
+  // Half a Hann: full weight at sample zero, tapering to nothing at the end.
+  //
+  // A symmetric Hann is zero at both ends, and an impact starts at sample zero —
+  // so it multiplied the few milliseconds of contact noise by about 0.002 and
+  // erased the very thing being measured. It reported 0.3% of the energy above
+  // 5.5kHz for a sound with an obvious top end, and would have had me chasing a
+  // brightness problem that was in the analysis rather than the audio. This
+  // shape keeps the transient and still avoids a discontinuity at the far end.
   for (let i = 0; i < take; i++) {
-    re[i] = samples[i] * (0.5 - 0.5 * Math.cos((2 * Math.PI * i) / (take - 1)));
+    re[i] = samples[i] * 0.5 * (1 + Math.cos((Math.PI * i) / (take - 1)));
   }
   fft(re, im);
   const bands = [];
@@ -121,6 +129,15 @@ try {
     const bands = spectrum(r.samples, rendered.rate);
     const total = bands.reduce((a, b) => a + b.energy, 0) || 1e-12;
     const high = bands.filter((b) => b.lo >= 6000).reduce((a, b) => a + b.energy, 0);
+    // Where the sound sits, not just how bright it is. 2.5-5.5kHz is where human
+    // hearing is most sensitive, so it is also where a sound turns from present
+    // to piercing; a die with nothing under 2.5k has no body and reads as thin.
+    const share = (lo, hi) =>
+      bands.filter((b) => b.lo >= lo && b.hi <= hi).reduce((a, b) => a + b.energy, 0) / total;
+    const body = share(150, 700);
+    const mid = share(700, 2500);
+    const harsh = share(2500, 5500);
+    const air = share(5500, 22000);
     // Log magnitudes make the comparison about shape rather than loudness.
     const shape = bands.map((b) => Math.log10(b.energy / total + 1e-9));
     const peak = Math.max(...r.samples.map(Math.abs));
@@ -138,7 +155,7 @@ try {
     const loudest = Math.max(...env);
     const at = env.findIndex((v, i) => i > env.indexOf(loudest) && v < loudest * 0.1);
     const decayMs = at < 0 ? Infinity : (at * win * 1000) / 44100;
-    return { ...r, bright: high / total, shape, peak, decayMs };
+    return { ...r, bright: high / total, shape, peak, decayMs, body, mid, harsh, air };
   });
 
   // Correlation, not raw cosine. Log magnitudes are all negative numbers of
@@ -183,20 +200,49 @@ try {
     const decay = decays.length ? mean(decays).toFixed(0) : '>370';
     console.log(`  ${surface.padEnd(6)} energy above 6kHz ${(mean(rows.map((r) => r.bright)) * 100).toFixed(1)}%   peak ${mean(rows.map((r) => r.peak)).toFixed(3)}   -20dB in ${decay}ms`);
   }
+  console.log(`\n  where the energy sits:`);
+  console.log(`    150-700Hz  body    ${(mean(analysed.map((a) => a.body)) * 100).toFixed(1)}%`);
+  console.log(`    0.7-2.5kHz mid     ${(mean(analysed.map((a) => a.mid)) * 100).toFixed(1)}%`);
+  console.log(`    2.5-5.5kHz harsh   ${(mean(analysed.map((a) => a.harsh)) * 100).toFixed(1)}%`);
+  console.log(`    5.5kHz+    air     ${(mean(analysed.map((a) => a.air)) * 100).toFixed(1)}%`);
   console.log(`\n  energy above 6kHz, overall     ${(bright * 100).toFixed(1)}%`);
   console.log(`  likeness of two like impacts   ${mean(sameKind).toFixed(3)}  (1.000 = identical)`);
 
-  // A hard little object is mostly top end. The single-bandpass version this
-  // replaced measured 0.4% — uniformly, on all three surfaces, which is both
-  // halves of the complaint in one number — against roughly 30% now.
-  if (bright < 0.12) {
-    console.error(`\n  FAIL only ${(bright * 100).toFixed(1)}% of the energy is above 6kHz — that is the muffled sound`);
+  // What this is really asking is not "is it bright" but "is it comfortable".
+  // Chasing brightness alone is how it ended up at 49% of its energy in the
+  // 2.5-5.5kHz band, which is where hearing is sharpest, with nothing at all
+  // between 150Hz and 2.5kHz — high and thin, and tiring to listen to. So the
+  // shape is bounded from both sides.
+  const body = mean(analysed.map((a) => a.body));
+  const mid = mean(analysed.map((a) => a.mid));
+  const harsh = mean(analysed.map((a) => a.harsh));
+  const air = mean(analysed.map((a) => a.air));
+
+  // Piercing: too much where the ear is most sensitive.
+  if (harsh > 0.35) {
+    console.error(`\n  FAIL ${(harsh * 100).toFixed(0)}% of the energy sits in 2.5-5.5kHz, where the ear is sharpest`);
+    failed = true;
+  }
+  // Thin: a die with no body under 2.5kHz is all edge and no object.
+  if (body + mid < 0.25) {
+    console.error(`\n  FAIL only ${((body + mid) * 100).toFixed(0)}% sits below 2.5kHz — that is thin`);
+    failed = true;
+  }
+  // Muffled: the original single-bandpass version measured 0.4% up here.
+  if (air < 0.04) {
+    console.error(`\n  FAIL only ${(air * 100).toFixed(1)}% of the energy is above 5.5kHz — that is the muffled sound`);
+    failed = true;
+  }
+  // Boomy: the low sine carries far more energy than anything else and will take
+  // the whole sound over given the chance.
+  if (body > 0.5) {
+    console.error(`\n  FAIL ${(body * 100).toFixed(0)}% sits in 150-700Hz — the thump has swallowed the strike`);
     failed = true;
   }
   // Two impacts of the same kind should still differ audibly. The limit sits
   // between the version that reused one filter shape every time (0.99) and this
-  // one (0.89); the same material struck the same way twice is meant to be
-  // similar, just not identical.
+  // one; the same material struck the same way twice is meant to be similar,
+  // just not identical.
   if (mean(sameKind) > 0.95) {
     console.error(`\n  FAIL two impacts of the same kind are ${mean(sameKind).toFixed(3)} alike — every contact sounds the same`);
     failed = true;
