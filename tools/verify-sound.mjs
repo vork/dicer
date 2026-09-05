@@ -203,6 +203,13 @@ try {
       return sum;
     };
     const tail = energyIn(0.025, 0.2) / (energyIn(0, 0.025) || 1e-12);
+    // What is still there long after the strike. The ratio above could not see
+    // this: it was dominated by the 25-40ms region, where there was plenty, and
+    // reported a healthy number for a sound that was already at absolute zero by
+    // 56ms. Both recordings still have content in every band at 96ms, and a cut
+    // to digital silence is one of the most recognisable synthetic tells there
+    // is, so this window looks only at the far end.
+    const far = energyIn(0.08, 0.2) / (energyIn(0, 0.025) || 1e-12);
     // Peak over RMS across the strike. Smooth enveloped noise sits low; a real
     // contact is spiky, being a great many tiny collisions between surface
     // asperities rather than one smooth push.
@@ -225,7 +232,7 @@ try {
     const loudest = Math.max(...env);
     const at = env.findIndex((v, i) => i > env.indexOf(loudest) && v < loudest * 0.1);
     const decayMs = at < 0 ? Infinity : (at * win * 1000) / 44100;
-    return { ...r, bright: high / total, shape, peak, decayMs, body, mid, harsh, air, centroid, flatness, tail, crest, correlation: r.correlation };
+    return { ...r, bright: high / total, shape, peak, decayMs, body, mid, harsh, air, centroid, flatness, tail, far, crest, correlation: r.correlation };
   });
 
   // Correlation, not raw cosine. Log magnitudes are all negative numbers of
@@ -282,6 +289,7 @@ try {
   console.log(`  below 2.5kHz vs above          ${(below / Math.max(above, 1e-6)).toFixed(1)}x`);
   console.log(`  spectral flatness              ${mean(analysed.map((a) => a.flatness)).toFixed(3)}  (low = tonal, high = clattery)`);
   console.log(`  tail after 25ms                ${(mean(analysed.map((a) => a.tail)) * 100).toFixed(1)}% of the strike's energy`);
+  console.log(`  still there at 80-200ms        ${(mean(analysed.map((a) => a.far)) * 100).toFixed(2)}% of it`);
   console.log(`  L/R correlation                ${mean(analysed.map((a) => a.correlation)).toFixed(3)}  (1.000 = the same signal twice)`);
   console.log(`  crest factor                   ${mean(analysed.map((a) => a.crest)).toFixed(2)}  (peak over RMS, first 30ms)`);
   console.log('');
@@ -343,6 +351,14 @@ try {
     failed = true;
   }
   // The recordings fall 20dB in 24ms and 38ms. A die is a click.
+  // Nothing physical stops dead. Before the room was added this measured 0.00%,
+  // for a sound that was silent from 56ms — while every other number here sat
+  // inside the recordings' range.
+  const far = mean(analysed.map((a) => a.far));
+  if (far < 0.002) {
+    console.error(`\n  FAIL only ${(far * 100).toFixed(3)}% of the energy survives to 80ms — the impact cuts to digital silence`);
+    failed = true;
+  }
   const slow = analysed.filter((a) => !Number.isFinite(a.decayMs) || a.decayMs > 220);
   if (slow.length) {
     console.error(`\n  FAIL ${slow.length} impact(s) ring on past 220ms — that is a chime, not a die`);

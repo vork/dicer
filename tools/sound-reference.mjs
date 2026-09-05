@@ -189,6 +189,7 @@ try {
       };
       const early = win(0, 0.025) || 1e-12;
       const late = win(0.025, 0.2);
+      const far = win(0.08, 0.2);
       // Crest factor over the strike: peak over RMS. Smooth enveloped noise sits
       // low; a real contact is spiky, because it is a great many tiny collisions
       // between surface asperities rather than one smooth push.
@@ -203,7 +204,7 @@ try {
       for (let i = peakIndex; i < env.length; i++) {
         if (env[i] < env[peakIndex] * 0.1) { decay = (i - peakIndex) * 2; break; }
       }
-      rows.push({ ...bands, decay, tail: late / early, clearMs, crest });
+      rows.push({ ...bands, decay, tail: late / early, far: far / early, clearMs, crest });
     }
 
     // How alike two impacts from the same recording are, by the same centred
@@ -255,6 +256,7 @@ try {
     console.log(`    tail after 25ms    ${tailNote}`);
     console.log(`    L/R correlation    ${channels > 1 ? correlation.toFixed(3) : 'mono file'}`);
     console.log(`    crest factor       ${median(rows.map((r) => r.crest)).toFixed(2)}  (peak over RMS, first 30ms)`);
+    console.log(`    still at 80-200ms  ${(median(rows.map((r) => r.far)) * 100).toFixed(2)}% of the strike`);
     console.log(`    contacts           ${onsets.length} in ${(samples.length / rate).toFixed(1)}s = ${(onsets.length / (samples.length / rate)).toFixed(1)}/s`);
     console.log(`    gaps between them  ${intervals.length ? intervals.map((v) => v.toFixed(0)).join(', ') : '-'} ms`);
   }

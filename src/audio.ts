@@ -44,6 +44,37 @@ export class DiceAudio {
     }
   }
 
+  /**
+   * A small, soft room with a table in it, generated rather than sampled.
+   *
+   * Four early reflections in the first forty milliseconds — the tabletop and
+   * whatever is nearest — over an exponentially decaying noise tail that is
+   * progressively darker, because a room absorbs the top end long before the
+   * bottom.
+   */
+  private static tabletop(context: BaseAudioContext): AudioBuffer {
+    const rate = context.sampleRate;
+    const length = Math.floor(rate * 0.32);
+    const buffer = context.createBuffer(2, length, rate);
+    for (let channel = 0; channel < 2; channel++) {
+      const data = buffer.getChannelData(channel);
+      let low = 0;
+      for (let i = 0; i < length; i++) {
+        const t = i / rate;
+        // One-pole low pass that closes as the tail decays, so the room gets
+        // duller as it dies away rather than hissing to the end.
+        const coefficient = 0.25 - 0.2 * Math.min(1, t / 0.32);
+        low += coefficient * ((Math.random() * 2 - 1) - low);
+        data[i] = low * Math.exp(-t * 19);
+      }
+      for (const [ms, gain] of [[6, 0.45], [11, 0.34], [19, 0.26], [31, 0.17]]) {
+        const at = Math.floor((rate * ms) / 1000);
+        if (at < length) data[at] += gain * (channel ? -1 : 1);
+      }
+    }
+    return buffer;
+  }
+
   /** Must be called from a user gesture; browsers block audio otherwise. */
   resume() {
     if (!this.context) this.init();
@@ -96,9 +127,28 @@ export class DiceAudio {
     presence.gain.value = -2.5;
     presence.connect(saturator);
 
+    // The room the dice are in.
+    //
+    // Without this an impact stops dead: measured against the recordings, both of
+    // them still have content across every band at 96ms, while ours was blank
+    // from 56ms — not quiet, empty. Nothing in the physical world decays into
+    // absolute silence, and that abrupt cut to nothing is most of what was left
+    // of sounding synthetic. A short tail also fills the gaps between contacts,
+    // which is what makes a roll sound like it is happening somewhere.
+    //
+    // I nearly built this two rounds ago and talked myself out of it because the
+    // recordings measured 1.000 stereo correlation. That was the wrong inference:
+    // it says they are mono, not that they are dry.
+    const room = context.createConvolver();
+    room.buffer = DiceAudio.tabletop(context);
+    const wet = context.createGain();
+    wet.gain.value = 0.85;
+    room.connect(wet).connect(presence);
+
     const master = context.createGain();
     master.gain.value = this.enabled ? 0.8 : 0;
     master.connect(presence);
+    master.connect(room);
 
     // Two seconds of white noise, reused for every click.
     const buffer = context.createBuffer(1, context.sampleRate * 2, context.sampleRate);

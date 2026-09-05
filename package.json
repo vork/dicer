@@ -21,6 +21,7 @@
     "verify:audio": "node tools/verify-audio.mjs",
     "verify:sound": "node tools/verify-sound.mjs",
     "sound:reference": "node tools/sound-reference.mjs",
+    "sound:spectrogram": "node tools/sound-spectrogram.mjs",
     "verify:build": "node tools/verify-build.mjs",
     "verify:flakes": "node tools/verify-flakes.mjs",
     "verify:pwa": "node tools/verify-pwa.mjs",
