@@ -1,15 +1,19 @@
 import type { ContactSurface } from './physics/dice-world';
 
 /**
+ * Where the body resonates, as ratios of the root. Inharmonic and dense — a solid
+ * object rings on ratios like these, not on a harmonic series — and fixed, so
+ * that the same die struck twice sounds like the same die.
+ */
+const MODES = [1, 1.42, 1.93, 2.51, 3.14, 3.87, 4.6];
+
+/**
  * Procedural dice audio. No samples to ship: each impact is one burst of noise
  * struck through a set of resonators — the sharp top end of the contact itself,
  * then three high-Q modes ringing where the body of the die would — layered with
  * a low sine for its mass. Everything is synthesised per impact, so timbre can
  * follow how hard the hit was, how big the die is, and what it landed on.
  */
-
-/** Inharmonic, the way a small solid object rings. Not a harmonic series. */
-const MODES = [1, 1.63, 2.41, 3.32];
 
 /**
  * Acrylic on felt, on leather and on acrylic sound nothing alike, and having
@@ -21,9 +25,9 @@ const SURFACES: Record<
   ContactSurface,
   { root: number; decay: number; tick: number; ring: number; body: number }
 > = {
-  floor: { root: 950, decay: 0.016, tick: 0.18, ring: 0.85, body: 0.55 },
-  wall: { root: 1150, decay: 0.019, tick: 0.25, ring: 0.90, body: 0.40 },
-  dice: { root: 1550, decay: 0.024, tick: 0.35, ring: 1.00, body: 0.22 },
+  floor: { root: 880, decay: 0.016, tick: 0.18, ring: 0.85, body: 0.55 },
+  wall: { root: 1050, decay: 0.019, tick: 0.25, ring: 0.90, body: 0.40 },
+  dice: { root: 1400, decay: 0.021, tick: 0.35, ring: 1.00, body: 0.22 },
 };
 export class DiceAudio {
   private context: AudioContext | null = null;
@@ -133,16 +137,25 @@ export class DiceAudio {
     // Target -20dB ring for the fundamental; the resonator Q is derived from it.
     const ring = voice.decay * jitter(0.25) * (0.7 + level * 0.5);
 
-    // One strike, one burst of energy, several paths out of it. The burst is a
-    // few milliseconds — the contact and nothing more — and what happens after
-    // it is the resonators ringing, not the noise continuing.
+    // A die does not land once. It comes down on an edge, tips, and drops onto a
+    // face, and those contacts are milliseconds apart — that clatter is most of
+    // what separates dice on a table from something being struck. So the
+    // excitation is two or three spikes a few milliseconds apart, each quieter
+    // than the last, re-striking the same resonators.
     const excite = context.createGain();
-    const burst = 0.006 * jitter(0.35);
-    excite.gain.setValueAtTime(0, now);
-    excite.gain.linearRampToValueAtTime(1, now + 0.0005);
-    excite.gain.exponentialRampToValueAtTime(0.0001, now + burst);
+    const burst = 0.005 * jitter(0.35);
+    const strikes = 1 + (Math.random() < 0.65 ? 1 : 0) + (Math.random() < 0.35 ? 1 : 0);
+    let at = now;
+    let force = 1;
+    for (let i = 0; i < strikes; i++) {
+      excite.gain.setValueAtTime(0.0001, at);
+      excite.gain.linearRampToValueAtTime(force, at + 0.0004);
+      excite.gain.exponentialRampToValueAtTime(0.0001, at + burst);
+      at += burst + 0.004 + Math.random() * 0.016;
+      force *= 0.4 + Math.random() * 0.3;
+    }
     source.connect(excite);
-    source.start(now, Math.random() * 1.5, burst + 0.02);
+    source.start(now, Math.random() * 1.5, at - now + 0.02);
 
     // The top end of the contact itself, which is most of what makes a die sound
     // hard rather than soft.
@@ -153,41 +166,51 @@ export class DiceAudio {
     tick.gain.value = voice.tick * level;
     excite.connect(edge).connect(tick).connect(placement);
 
-    // And the body ringing. Resonators, struck by that burst and left to ring on
-    // their own — not sine oscillators, and not noise held through a filter.
+    // And the body ringing. Resonators, struck by that clatter and left to ring
+    // on their own — not sine oscillators, and not noise held through a filter.
     //
-    // Both of those were tried and both were wrong in the same place. Sines are
-    // pure tones and read as digital beeps; noise held through a filter for the
-    // whole ring is a hiss. What sits between them is a filter with enough Q to
-    // ring on its own after a short strike, which keeps the pitch of a mode and
-    // the grain of a real object.
+    // Both of those were tried and both were wrong. Sines are pure tones and read
+    // as digital beeps; noise held through a filter for the whole ring is a hiss.
+    // A filter with enough Q to ring after a short strike sits between them,
+    // keeping the pitch of a mode and the grain of a real object. Whether that is
+    // possible depends entirely on frequency: the ring is T20 = 2.303*Q/(pi*f),
+    // so at the 4kHz the modes once sat at even Q 20 rings for 3.5ms and there is
+    // nothing to hear, while down here at 950-1550Hz the same arithmetic gives
+    // tens of milliseconds.
     //
-    // Whether that is possible depends entirely on frequency, which is what I got
-    // wrong first: a resonator's ring is T20 = 2.303 * Q / (pi * f), so at the
-    // 4kHz the modes used to sit at, even Q 20 rings for 3.5ms and there is
-    // nothing to hear. Down at 950-1550Hz the same arithmetic gives 25-38ms,
-    // which is exactly what the reference recordings do.
-    const root = (voice.root * 0.5) / Math.max(radius, 0.2) * jitter(0.28);
-    const modes = Math.random() < 0.35 ? MODES.slice(0, 3) : MODES;
-    for (const ratio of modes) {
-      const hz = Math.min(root * ratio * jitter(0.22), 15000);
-      // Higher modes lose their energy faster, which is why a struck object
-      // brightens for an instant and then darkens as it rings out.
-      const t20 = (ring / Math.pow(ratio, 0.7)) * jitter(0.3);
-      const q = Math.min(Math.max((Math.PI * hz * t20) / 2.303, 4), 150);
+    // The ratios are drawn fresh for every impact rather than taken from a fixed
+    // set. A fixed set is a chord, and a chord struck over and over is a tuned
+    // instrument — which is exactly what it sounded like. Dice have no tuning:
+    // the modes a contact happens to excite depend on where it was struck, so
+    // they should differ every time and never resolve into a pitch.
+    const root = (voice.root * 0.5) / Math.max(radius, 0.2) * jitter(0.06);
+    for (const nominal of MODES) {
+      // A fixed set of ratios, barely jittered, and a root that hardly moves.
+      //
+      // This was drawing fresh random ratios for every impact, on the theory that
+      // variety reads as realism. It does not. Measured, two impacts from a real
+      // dice recording are 0.90 alike — the same object struck again sounds like
+      // the same object. Redrawing the modes each time gave every hit a different
+      // set of pitches, and a sequence of different pitches is a marimba being
+      // played, which is exactly what it sounded like.
+      const ratio = nominal * jitter(0.05);
+      const hz = Math.min(root * ratio, 15000);
+      // Deliberately short and broad. A narrow resonator holds a pitch; a
+      // handful of broad ones overlapping read as a body with a colour.
+      const t20 = ((ring * 0.75) / Math.pow(ratio, 0.5)) * jitter(0.12);
+      const q = Math.min(Math.max((Math.PI * hz * t20) / 2.303, 3), 90);
       const mode = context.createBiquadFilter();
       mode.type = 'bandpass';
       mode.frequency.value = hz;
       mode.Q.value = q;
       const gain = context.createGain();
-      // A narrower resonator takes a far smaller bite out of a broadband strike,
-      // and the bite is proportional to its bandwidth f/Q — so putting the level
-      // back means scaling by sqrt(Q/f), not by sqrt(Q). Getting that wrong left
-      // the modes about fifty times too quiet against the wideband contact
-      // noise, and the whole sound collapsed into the tick.
+      // A narrow resonator takes a bite out of a broadband strike proportional to
+      // its bandwidth f/Q, so restoring the level scales by sqrt(Q/f) — not
+      // sqrt(Q), which left the modes fifty times too quiet against the contact
+      // noise and collapsed the whole sound into the tick.
       gain.gain.value =
-        voice.ring * level * Math.pow(ratio, -0.75) * (0.55 + Math.random() * 0.6) *
-        Math.sqrt(q / hz) * 300;
+        voice.ring * level * Math.pow(ratio, -0.35) * (0.85 + Math.random() * 0.3) *
+        Math.sqrt(q / hz) * 150;
       excite.connect(mode).connect(gain).connect(placement);
     }
 

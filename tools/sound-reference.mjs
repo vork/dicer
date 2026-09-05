@@ -75,7 +75,33 @@ function analyse(samples, rate) {
     num += p * ((k * rate) / n);
     den += p;
   }
+  // Spectral flatness over raw bins: the geometric mean of bin power over the
+  // arithmetic mean. Near zero means the energy stands in a few narrow places,
+  // which is what a pitch is; near one means it is spread, which is a clatter.
+  // Raw bins rather than bands, because a resonator is far narrower than a
+  // third-octave band and banding averages the peaks away.
+  const fa = Math.max(1, Math.round((150 / rate) * n));
+  const fb = Math.min(n / 2, Math.round((12000 / rate) * n));
+  let logSum = 0;
+  let linSum = 0;
+  for (let k = fa; k < fb; k++) {
+    const p = re[k] * re[k] + im[k] * im[k];
+    logSum += Math.log(p + 1e-20);
+    linSum += p;
+  }
+  const flatness = Math.exp(logSum / (fb - fa)) / (linSum / (fb - fa));
+
+  // Third-octave log-magnitude shape, for comparing one impact against another.
+  const shapeEdges = [];
+  for (let f = 150; f <= 12000; f *= Math.pow(2, 1 / 3)) shapeEdges.push(f);
+  const shape = [];
+  for (let b = 0; b < shapeEdges.length - 1; b++) {
+    shape.push(Math.log10(power(shapeEdges[b], shapeEdges[b + 1]) / total + 1e-9));
+  }
+
   return {
+    shape,
+    flatness,
     body: power(150, 700) / total,
     mid: power(700, 2500) / total,
     harsh: power(2500, 5500) / total,
@@ -140,6 +166,28 @@ try {
       rows.push({ ...bands, decay });
     }
 
+    // How alike two impacts from the same recording are, by the same centred
+    // correlation verify-sound uses on the synthesis. This is the number for
+    // "does every hit sound like the same instrument being played again".
+    const centred = (a, b) => {
+      const mean = (xs) => xs.reduce((p, q) => p + q, 0) / xs.length;
+      const ma = mean(a);
+      const mb = mean(b);
+      let dot = 0;
+      let na = 0;
+      let nb = 0;
+      for (let i = 0; i < a.length; i++) {
+        const x = a[i] - ma;
+        const y = b[i] - mb;
+        dot += x * y; na += x * x; nb += y * y;
+      }
+      return dot / Math.sqrt(na * nb);
+    };
+    const pairs = [];
+    for (let i = 0; i < rows.length; i++) {
+      for (let j = i + 1; j < rows.length; j++) pairs.push(centred(rows[i].shape, rows[j].shape));
+    }
+
     const median = (xs) => {
       const s = xs.slice().sort((a, b) => a - b);
       return s[Math.floor(s.length / 2)];
@@ -151,7 +199,9 @@ try {
     console.log(`    2.5-5.5kHz harsh   ${(median(rows.map((r) => r.harsh)) * 100).toFixed(1)}%`);
     console.log(`    5.5kHz+    air     ${(median(rows.map((r) => r.air)) * 100).toFixed(1)}%`);
     console.log(`    spectral centroid  ${median(rows.map((r) => r.centroid)).toFixed(0)}Hz`);
+    console.log(`    spectral flatness  ${median(rows.map((r) => r.flatness)).toFixed(3)}`);
     console.log(`    -20dB in           ${decays.length ? median(decays).toFixed(0) : '?'}ms`);
+    console.log(`    likeness of two    ${pairs.length ? median(pairs).toFixed(3) : '?'}`);
   }
 } finally {
   await browser.close();

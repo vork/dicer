@@ -56,6 +56,28 @@ function fft(re, im) {
   }
 }
 
+/**
+ * Spectral flatness over raw bins: the geometric mean of bin power over the
+ * arithmetic mean. Near zero means the energy stands in a few narrow places,
+ * which is what a pitch is; near one means it is spread, which is what a clatter
+ * is. This is the number for "does it sound like a tuned instrument".
+ */
+function binFlatness(re, im, lo, hi, rate, n) {
+  const a = Math.max(1, Math.round((lo / rate) * n));
+  const b = Math.min(n / 2, Math.round((hi / rate) * n));
+  let logSum = 0;
+  let linSum = 0;
+  let count = 0;
+  for (let k = a; k < b; k++) {
+    const p = re[k] * re[k] + im[k] * im[k];
+    logSum += Math.log(p + 1e-20);
+    linSum += p;
+    count++;
+  }
+  if (!count) return 0;
+  return Math.exp(logSum / count) / (linSum / count);
+}
+
 /** Log-spaced band energies, which is roughly how hearing compares timbres. */
 function spectrum(samples, sampleRate) {
   const n = 16384;
@@ -84,7 +106,7 @@ function spectrum(samples, sampleRate) {
     for (let k = lo; k < hi && k < n / 2; k++) sum += re[k] * re[k] + im[k] * im[k];
     bands.push({ lo: edges[b], hi: edges[b + 1], energy: sum });
   }
-  return bands;
+  return { bands, re, im, n };
 }
 
 let failed = false;
@@ -126,7 +148,8 @@ try {
   });
 
   const analysed = rendered.out.map((r) => {
-    const bands = spectrum(r.samples, rendered.rate);
+    const { bands, re, im, n } = spectrum(r.samples, rendered.rate);
+    const sampleRate = rendered.rate;
     const total = bands.reduce((a, b) => a + b.energy, 0) || 1e-12;
     const high = bands.filter((b) => b.lo >= 6000).reduce((a, b) => a + b.energy, 0);
     // Where the sound sits, not just how bright it is. 2.5-5.5kHz is where human
@@ -148,6 +171,16 @@ try {
       den += b.energy;
     }
     const centroid = den > 0 ? num / den : 0;
+    // Spectral flatness: the geometric mean of the band energies over their
+    // arithmetic mean. Near zero means the energy is concentrated in a few
+    // places, which is what a pitch is; near one means it is spread, which is
+    // what a clatter is. This is the number for "does it sound like a tuned
+    // instrument", and nothing else here measures it.
+    // Computed on raw FFT bins, not on the third-octave bands above. A resonator
+    // at 1kHz with a Q of 20 is 50Hz wide; a third-octave band there is 230Hz, so
+    // banding averages away the very peaks that make a pitch and reports the same
+    // number for a chord and a clatter.
+    const flatness = binFlatness(re, im, 150, 12000, sampleRate, n);
     // Log magnitudes make the comparison about shape rather than loudness.
     const shape = bands.map((b) => Math.log10(b.energy / total + 1e-9));
     const peak = Math.max(...r.samples.map(Math.abs));
@@ -165,7 +198,7 @@ try {
     const loudest = Math.max(...env);
     const at = env.findIndex((v, i) => i > env.indexOf(loudest) && v < loudest * 0.1);
     const decayMs = at < 0 ? Infinity : (at * win * 1000) / 44100;
-    return { ...r, bright: high / total, shape, peak, decayMs, body, mid, harsh, air, centroid };
+    return { ...r, bright: high / total, shape, peak, decayMs, body, mid, harsh, air, centroid, flatness };
   });
 
   // Correlation, not raw cosine. Log magnitudes are all negative numbers of
@@ -220,12 +253,13 @@ try {
   const above = mean(analysed.map((a) => a.harsh + a.air));
   console.log(`\n  spectral centroid              ${centroid.toFixed(0)}Hz`);
   console.log(`  below 2.5kHz vs above          ${(below / Math.max(above, 1e-6)).toFixed(1)}x`);
+  console.log(`  spectral flatness              ${mean(analysed.map((a) => a.flatness)).toFixed(3)}  (low = tonal, high = clattery)`);
   console.log('');
   console.log('  two real recordings, measured the same way:');
   console.log('    freesound rpg dice   body 11.9  mid 84.6  harsh  3.4  air 0.0   1383Hz  24ms');
   console.log('    pixabay dice 142528  body 10.6  mid 47.8  harsh 38.9  air 4.7   2500Hz  38ms');
   console.log(`\n  energy above 6kHz, overall     ${(bright * 100).toFixed(1)}%`);
-  console.log(`  likeness of two like impacts   ${mean(sameKind).toFixed(3)}  (1.000 = identical)`);
+  console.log(`  likeness of two like impacts   ${mean(sameKind).toFixed(3)}  (recordings: 0.90, 0.91)`);
 
   // The bounds below come from measuring two real dice recordings the user
   // picked out as pleasant (npm run sound:reference), not from theory — and the
@@ -261,8 +295,21 @@ try {
     console.error(`\n  FAIL centroid at ${centroid.toFixed(0)}Hz — the recordings sit at 1383 and 2500`);
     failed = true;
   }
-  if (mean(sameKind) > 0.95) {
-    console.error(`\n  FAIL two impacts of the same kind are ${mean(sameKind).toFixed(3)} alike — every contact sounds the same`);
+  // Bounded from both sides, and the lower bound is the one that mattered.
+  //
+  // I had assumed variety was the goal and pushed successive impacts apart, down
+  // to 0.60 alike. Measuring the recordings says the opposite: two impacts from a
+  // real roll are 0.90 and 0.91 alike, because the same object struck again
+  // sounds like the same object. Redrawing the resonances every impact gives each
+  // hit a different set of pitches, and a sequence of different pitches is an
+  // instrument being played — which is what it sounded like.
+  const alike = mean(sameKind);
+  if (alike > 0.97) {
+    console.error(`\n  FAIL two impacts of the same kind are ${alike.toFixed(3)} alike — every contact is identical`);
+    failed = true;
+  }
+  if (alike < 0.7) {
+    console.error(`\n  FAIL two impacts of the same kind are only ${alike.toFixed(3)} alike — the recordings are 0.90, and a die that changes pitch every throw is an instrument`);
     failed = true;
   }
   // The recordings fall 20dB in 24ms and 38ms. A die is a click.
@@ -275,7 +322,7 @@ try {
     console.error('\n  FAIL an impact clips');
     failed = true;
   }
-  if (!failed) console.log('\nthe impacts sit where the real recordings do, and no two are alike');
+  if (!failed) console.log('\nthe impacts sit where the real recordings do');
 } catch (error) {
   console.error(error);
   failed = true;

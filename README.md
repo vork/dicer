@@ -406,15 +406,18 @@ construction, only by measurement.
 ## The sound
 
 Every impact is synthesised: a few milliseconds of noise for the contact itself,
-striking three or four resonators tuned to inharmonic ratios, which then ring on
-their own, with a low sine underneath for the die's mass. Higher modes ring down
+striking a fixed bank of resonators on inharmonic ratios, which then ring on their
+own, with a low sine underneath for the die's mass. The contact is two or three
+spikes milliseconds apart rather than one, because a die lands on an edge and tips
+onto a face. Higher modes ring down
 faster, which is why a struck object brightens for an instant and then darkens as
 it rings out. Each impact draws its own root, ratios, mode count, amplitudes and
 decays, and a big die rings lower than a small one. Nothing is sampled.
 
-It took five passes to get there, and every fault is worth recording, because each
-was audible before it was measurable and two of them came from a correct
-calculation applied to the wrong case.
+It took six passes to get there, and every fault is worth recording. Each was
+audible before it was measurable, two came from a correct calculation applied to
+the wrong case, and two more came from assumptions about what real dice sound like
+that the recordings simply disproved.
 
 **Muffled and same-y.** It began as a single bandpass at 1.5-4kHz with a Q of
 about one. A filter that shape has essentially nothing above 8kHz, so the sound
@@ -445,6 +448,21 @@ fifty times too quiet against the wideband contact noise and the whole sound
 collapsed into the tick: 7% of its energy in the mid band, 35% above 5.5kHz, a
 centroid of 4.9kHz.
 
+**Like a marimba.** A marimba is an instrument where every strike gives a
+different note, and that is what this was doing: the mode ratios were being drawn
+fresh for each impact, on my assumption that variety reads as realism. It does
+not. Two impacts from a real dice recording measure 0.90 and 0.91 alike, because
+the same object struck again sounds like the same object — while mine, with the
+surface and the strength held constant, had been pushed down to 0.60. A sequence
+of different pitches is a tune. The ratios are fixed again, the root barely moves,
+and the character comes from damping and contact noise rather than from shuffling
+the pitch.
+
+A die also does not land once. It comes down on an edge, tips, and drops onto a
+face, so the excitation is two or three spikes a few milliseconds apart, each
+quieter than the last, re-striking the same resonators. That clatter is a good
+part of what separates dice on a table from something being struck.
+
 **High and thin.** Those modes were pitched at 3.6-5.2kHz, which left 0.6% of every
 impact's energy below 2.5kHz and 71% above it — all edge, no object. The modes
 moved down to 950-1550Hz, the contact noise's high-pass came down with them, the
@@ -469,11 +487,11 @@ measured on its own, and out come the same bands — so the synthesis has someth
 to aim at instead of my opinion. Measuring two that were picked out as sounding
 good corrected both of the assumptions I had been tuning against:
 
-| | body | mid | harsh | air | centroid | -20dB |
-| --- | --- | --- | --- | --- | --- | --- |
-| freesound rpg dice | 11.9% | 84.6% | 3.4% | 0.0% | 1383Hz | 24ms |
-| pixabay dice 142528 | 10.6% | 47.8% | 38.9% | 4.7% | 2500Hz | 38ms |
-| this | 10.7% | 64.0% | 9.5% | 1.5% | 1861Hz | 30-35ms |
+| | body | mid | harsh | air | centroid | flatness | -20dB | likeness |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| freesound rpg dice | 11.9% | 84.6% | 3.4% | 0.0% | 1383Hz | 0.004 | 24ms | 0.901 |
+| pixabay dice 142528 | 10.6% | 47.8% | 38.9% | 4.7% | 2500Hz | 0.090 | 38ms | 0.913 |
+| this | 10.8% | 52.8% | 17.0% | 4.6% | 2414Hz | 0.088 | 39ms | 0.890 |
 
 I had blamed the 2.5-5.5kHz band, because the version reported as uncomfortable
 had 44% of its energy there. One of the recordings has 39% in that band and sounds
@@ -484,6 +502,19 @@ the bound belongs on the balance rather than on the bright band alone.
 I had also required energy above 5.5kHz on the theory that a hard little object is
 mostly top end. One of the recordings has none at all, 0.0%, and is perfectly
 pleasant. That requirement was wrong and is gone.
+
+And I had treated variety as a virtue, pushing successive impacts apart until they
+were 0.60 alike and asserting they must not be more than 0.95. The recordings are
+0.90 and 0.91 alike — measured without even controlling for which surface was hit,
+where the synthesis is measured holding surface and strength constant, so the real
+gap was wider still. That bound now runs both ways, and the lower half is the one
+that was doing the damage.
+
+Spectral flatness — the geometric mean of bin power over the arithmetic mean, low
+for a pitch and high for a clatter — had to be computed on raw FFT bins to say
+anything. Over third-octave bands it returned much the same number for a chord as
+for a clatter, because a resonator at 1kHz with a Q of 20 is 50Hz wide and the band
+around it is 230Hz, so the banding averaged away the peaks that make the pitch.
 
 What remains is bounded by what the recordings actually do: at least as much energy
 below 2.5kHz as above (they are 1.3x and 28x that way; the uncomfortable version
