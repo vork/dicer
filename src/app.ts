@@ -32,6 +32,7 @@ export class App {
   private readonly scene = new THREE.Scene();
   private readonly director: CameraDirector;
   private readonly clock = new THREE.Clock();
+  private paused = false;
   private readonly bounds = new THREE.Sphere();
   private readonly audio = new DiceAudio();
 
@@ -203,6 +204,10 @@ export class App {
   private tick = () => {
     if (!this.running) return;
     const delta = Math.min(this.clock.getDelta(), 0.05);
+    // Held still so a tool can pose the scene by hand and render single frames.
+    // Motion blur is a function of where things were drawn last frame, so
+    // measuring it needs the frames under test to be the only ones happening.
+    if (this.paused) return;
 
     const { impacts, justSettled } = this.diceWorld.step(delta);
     for (const impact of impacts) {
@@ -225,6 +230,11 @@ export class App {
     this.diceWorld.getBounds(this.bounds, this.revealing ? this.revealFocus : undefined);
     if (!this.cameraFrozen) this.director.update(delta, this.bounds);
     this.postFx.setFocus(this.director.revealProgress);
+    // Stood down as the reveal closes in. The blur is there to smooth a throw,
+    // and by the reveal nothing is moving but the camera — all it could do then
+    // is soften the numerals, which are the one thing on screen that has to be
+    // legible.
+    this.postFx.setMotionBlur(1 - this.director.revealProgress);
     this.postFx.render(delta);
   };
 
@@ -260,9 +270,16 @@ export class App {
       setBloom: (strength: number, radius: number, threshold: number) =>
         this.postFx.setBloom(strength, radius, threshold),
       setGrain: (amount: number) => this.postFx.setGrain(amount),
+      setMotionBlur: (amount: number) => this.postFx.setMotionBlur(amount),
+      readVelocity: () => this.postFx.readVelocity(),
       freezeCamera: (frozen: boolean) => {
         this.cameraFrozen = frozen;
       },
+      pause: (paused: boolean) => {
+        this.paused = paused;
+      },
+      renderFrame: (delta = 1 / 60) => this.postFx.render(delta),
+      diceMeshes: () => this.diceWorld.dice.map((die) => die.mesh),
       wallDistance: (y: number, dx: number, dz: number) => this.diceWorld.wallDistance(y, dx, dz),
       roll: (x: number, z: number, power: number) => this.throwDice(new THREE.Vector2(x, z), power),
       setPool: (pool: DieType[]) => this.hud.setPool(pool),

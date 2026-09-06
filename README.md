@@ -425,6 +425,91 @@ without that the first die in the pool would always leave from the same place
 relative to the heading, so the pool's slots could not be independent by
 construction, only by measurement.
 
+## Motion blur
+
+A thrown die crosses a good part of the screen in a frame, and a frame is a
+still: the eye is handed a sequence of sharp dice in different places and reads
+it as a series of jumps rather than a throw. The fix is the one a camera applies
+for free — a shutter open for part of the frame, so what moved is drawn as the
+streak it made rather than as a point.
+
+It is a screen-space blur off a velocity buffer. Every frame the scene is
+re-rendered with all its materials swapped for one that projects each vertex
+twice: once with this frame's model and camera matrices, once with last frame's.
+The difference is where that point went since the last frame. Doing it from
+matrices, rather than from any per-object velocity, is what makes it right for
+everything at once — a tumbling die moves because its own transform changed, the
+tray moves because the camera did, and a die that is both falling and being
+tracked gets the sum, with the rotation about its own centre included, which is
+most of what a thrown die is doing.
+
+The length is whatever actually happened between the last two frames, so this
+follows the frame rate by construction rather than by a constant. At 30fps a die
+covers twice the ground it covers at 60, so it gets twice the exposure. That is
+the point of it: the smear is exactly as long as the gap it has to bridge, which
+is why a slow frame stops reading as a jump instead of reading as a longer one.
+A ceiling of five percent of the frame height keeps a dropped frame from
+streaking, and the blur is faded out as the reveal closes in, since by then
+nothing is moving but the camera and all it could do is soften the numerals.
+
+Three things had to be got right, and each was wrong first.
+
+**The per-object uniform was uploaded once for the whole pass.** Every mesh is
+drawn with the same override material, and its last-frame transform is handed to
+it as that material's uniform just before it draws — but three.js only re-uploads
+a `ShaderMaterial`'s uniforms when the material changes, not when an object does.
+So the first mesh drawn set the uniform and every mesh after it was drawn holding
+*that* mesh's transform. Everything on screen came out with a velocity of
+whatever the difference between it and the first mesh happened to be, which meant
+the blur smeared frames in which nothing had moved at all. `uniformsNeedUpdate`
+exists for precisely this and is the whole fix. Worth knowing that the symptom —
+a still scene being blurred — points at the velocity, and the velocity pointed at
+three's upload rules rather than at any of the geometry I spent three rounds
+suspecting.
+
+**The perspective divide has to be guarded.** The velocity is a difference of two
+projected positions, and the divide by `w` is meaningless once `w` goes
+non-positive. The ground is a disc 140 units across under a camera 18 up and 17
+back, so its triangles cross the camera plane every frame; interpolating across
+one of those produced velocities of nearly two screen widths, which then won
+every neighbourhood in the blur pass. Anything behind the camera is now zero, and
+the velocity is clamped at source as well, because a single bad texel is picked up
+by every neighbourhood around it.
+
+**The view matrix has to be inverted rather than read.** `camera.matrixWorldInverse`
+is only refreshed inside the renderer's own `render()`, so taking it as it stands
+compares this frame's geometry against a view matrix one frame old, and puts a
+velocity on every static thing in the scene.
+
+`npm run verify:blur` measures the thing being claimed rather than the presence
+of an effect. It poses the dice by hand with the app paused — writing a die's
+last-frame transform and its current one directly, which is what the physics does
+every frame — so the distance covered is known rather than estimated. Then it
+asks which exposure actually reproduces the blurred frame: a screen-space blur is
+the sharp frame averaged along the direction of travel, so the sharp frame
+averaged over a candidate length should reproduce the blurred one, and only the
+right length does. Scanning the candidates and taking the best fit gives the
+exposure in pixels with no threshold anywhere in it, and the check prints the fit
+error at zero and at double so the minimum is visibly a minimum.
+
+Two simpler measurements were tried first and both failed for the same reason,
+which is worth recording: a smear tapers. The width of the region whose pixels
+changed puts the smear's tail under whatever threshold you pick — it reported a
+blur growing 3px where the geometry said 9px, and then flattening entirely.
+Recovering the length from the spread of the luminance gradient failed differently:
+a box convolution adds its own variance, which is exact for one edge and useless
+for a window containing a die, its numerals and a tray, where it read five times
+long and saturated. The best fit has neither problem. Measured against a
+displacement known in advance it returns 4, 7, 11 and 15 pixels where the geometry
+predicts 3.9, 7.8, 12.4 and 17.1, an exposure running 0.46 of the distance covered
+against the 0.55 the shutter is set to.
+
+It also checks the two things that would be invisible in a still: that a scene in
+which nothing moved has a velocity buffer of exactly zero, and that when one die
+moves, only about that die's worth of the buffer moves with it. That second one is
+what the uniform bug broke, and a picture alone could only say that something was
+wrong.
+
 ## The sound
 
 Every impact is synthesised: a few milliseconds of noise for the contact itself,
@@ -714,8 +799,9 @@ the wrong thing:
 | `npm run sound:spectrogram` | print a real impact and one of ours side by side |
 | `npm run sound:roll` | render a whole physics roll beside a recording of one |
 | `npm run verify:flakes` | the sparkle does not jump as the camera closes in |
-| `npm run verify:build` | the built site runs from a sub-path, with no 404s |
-| `npm run verify:pwa` | the installed app boots and rolls with the network cut |
+| `npm run verify:blur` | the smear matches the distance a die covered in the frame |
+| `npm run verify:build` | rebuilds, then runs the built site from a sub-path with no 404s |
+| `npm run verify:pwa` | rebuilds, then boots the installed app with the network cut |
 | `npm run calibrate` | regenerate the face contact sheets |
 | `npm run flakes` | contact sheet of flake settings on one settled die |
 | `npm run shoot` | screenshot the running app at each stage |

@@ -58,6 +58,13 @@ export interface Die {
   /** Local-space directions to test against world up: face normals, or hull corners for a d4. */
   readDirections: THREE.Vector3[];
   previousSpeed: number;
+  /**
+   * Set whenever a die is put somewhere rather than travelling there. Motion blur
+   * works from where a die was drawn last frame, and a die that was picked up and
+   * dropped elsewhere did not cross the screen to get there — without this it
+   * would be smeared along the whole length of the jump for one frame.
+   */
+  teleported: boolean;
 }
 
 /** What a die hit. Acrylic on felt, on leather and on acrylic sound nothing alike. */
@@ -277,6 +284,7 @@ export class DiceWorld {
       const info = this.assets.info[type];
       die.body.setTranslation({ x, y: TRAY.floorY + info.inradius + 0.02, z }, true);
       die.body.setRotation(randomQuaternion(), true);
+      die.teleported = true;
       this.dice.push(die);
     });
 
@@ -319,6 +327,9 @@ export class DiceWorld {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.frustumCulled = false;
+    // Where this die was drawn last frame, for the velocity pass to compare
+    // against. A mesh that has never been drawn has none, hence `teleported`.
+    mesh.userData.previousMatrixWorld = new THREE.Matrix4();
     this.group.add(mesh);
 
     const readDirections = readDirectionsFor(type, info);
@@ -333,6 +344,7 @@ export class DiceWorld {
       value: null,
       readDirections,
       previousSpeed: 0,
+      teleported: true,
     };
   }
 
@@ -378,6 +390,7 @@ export class DiceWorld {
 
       die.body.setTranslation({ x, y, z }, true);
       die.body.setRotation(randomQuaternion(), true);
+      die.teleported = true;
 
       const spread = (Math.random() - 0.5) * 0.22;
       const cos = Math.cos(spread);
@@ -464,6 +477,7 @@ export class DiceWorld {
       if (die.body.translation().y < TRAY.floorY - 6) {
         die.body.setTranslation({ x: 0, y: TRAY.floorY + 6, z: 0 }, true);
         die.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+        die.teleported = true;
         die.settled = false;
         die.restSeconds = 0;
         continue;
@@ -531,6 +545,7 @@ export class DiceWorld {
       const spot = this.clearSpot(die);
       die.body.setTranslation({ x: spot.x, y: TRAY.floorY + 3.2, z: spot.z }, true);
       die.body.setRotation(randomQuaternion(), true);
+      die.teleported = true;
       die.body.setLinvel({ x: 0, y: -3, z: 0 }, true);
       die.body.setAngvel(
         { x: (Math.random() - 0.5) * 14, y: (Math.random() - 0.5) * 14, z: (Math.random() - 0.5) * 14 },
@@ -577,8 +592,17 @@ export class DiceWorld {
     for (const die of this.dice) {
       const t = die.body.translation();
       const r = die.body.rotation();
+      // Keep where it was drawn last frame before overwriting it. At this point
+      // matrixWorld still holds the transform the last render used.
+      const previous = die.mesh.userData.previousMatrixWorld as THREE.Matrix4;
+      previous.copy(die.mesh.matrixWorld);
       die.mesh.position.set(t.x, t.y, t.z);
       die.mesh.quaternion.set(r.x, r.y, r.z, r.w);
+      if (die.teleported) {
+        die.mesh.updateMatrixWorld(true);
+        previous.copy(die.mesh.matrixWorld);
+        die.teleported = false;
+      }
     }
   }
 
