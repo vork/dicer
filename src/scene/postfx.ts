@@ -150,11 +150,9 @@ const VelocityShader = {
  * Motion blur: for each pixel, average the frame along the direction that pixel
  * moved, over the length it travelled while the shutter was open.
  *
- * The length is whatever actually happened between the last two frames, so this
- * is frame-rate dependent by construction rather than by a constant: at 30fps a
- * die covers twice the ground it covers at 60, and gets twice the smear. That is
- * the whole point of it — a longer exposure is exactly what stops a big step
- * between frames from reading as a jump.
+ * The length is whatever actually happened between the last two frames, and the
+ * shutter on top of it opens wider as frames get longer, so a slow frame rate is
+ * blurred more than proportionally. See SHUTTER for why.
  */
 const MotionBlurShader = {
   uniforms: {
@@ -162,11 +160,10 @@ const MotionBlurShader = {
     tVelocity: { value: null as THREE.Texture | null },
     uResolution: { value: new THREE.Vector2(1, 1) },
     /**
-     * How much of the frame interval the shutter is open. Film's 180-degree
-     * shutter is 0.5; a touch over that is the usual game convention, since a
-     * game has no in-between frames to fall back on.
+     * How much of the frame interval the shutter is open. Set per frame from how
+     * long the frames are actually taking — see SHUTTER below.
      */
-    uShutter: { value: 0.55 },
+    uShutter: { value: 0.5 },
     /** Hard ceiling on the smear, in pixels, so a dropped frame cannot streak. */
     uMaxPixels: { value: 48 },
     /** Master amount. Falls to zero for the reveal, where legibility wins. */
@@ -203,26 +200,39 @@ const MotionBlurShader = {
         return;
       }
 
-      // The longest velocity in a small neighbourhood, not this pixel's own.
+      // Look for something whose smear reaches this pixel, not just this pixel's
+      // own velocity.
       //
       // A pixel just outside a moving die has no velocity of its own, so taking
-      // it literally would blur the die only within its own silhouette and leave
-      // a hard edge around a smear — which looks worse than no blur at all.
-      // Reaching a few pixels out lets the smear cross the outline.
-      vec2 step = 3.0 / uResolution;
+      // it literally blurs the die within its own silhouette and leaves a hard
+      // edge around the smear, which looks worse than no blur at all. The search
+      // has to reach as far as the longest smear can travel — half of it, since
+      // the exposure is centred — or a long smear is simply clipped back to the
+      // outline. Measured: a 35px exposure came out 21px when this reached only
+      // three pixels, and the shortfall grew with the length.
+      //
+      // A point is only allowed to claim this pixel if its own smear actually
+      // covers the distance, which is what keeps the reach from dragging a fast
+      // die's velocity onto scenery it never passed over.
+      float open = uShutter * uAmount;
       vec2 velocity = texture2D(tVelocity, vUv).xy;
-      float longest = dot(velocity, velocity);
-      for (int i = 0; i < 4; i++) {
-        vec2 corner = vec2(i == 0 || i == 3 ? 1.0 : -1.0, i < 2 ? 1.0 : -1.0);
-        vec2 found = texture2D(tVelocity, vUv + corner * step).xy;
-        float size = dot(found, found);
-        if (size > longest) {
-          longest = size;
+      float longest = length(velocity * uResolution) * open;
+      float reach = uMaxPixels * 0.5;
+      for (int i = 0; i < 12; i++) {
+        // Golden angle, so twelve samples spread evenly over the disc rather than
+        // lining up into spokes.
+        float turn = float(i) * 2.399963;
+        float radius = reach * sqrt((float(i) + 0.5) / 12.0);
+        vec2 away = vec2(cos(turn), sin(turn)) * radius;
+        vec2 found = texture2D(tVelocity, vUv + away / uResolution).xy;
+        float smear = length(found * uResolution) * open;
+        if (smear * 0.5 >= radius && smear > longest) {
+          longest = smear;
           velocity = found;
         }
       }
 
-      vec2 offset = velocity * uShutter * uAmount;
+      vec2 offset = velocity * open;
       float pixels = length(offset * uResolution);
       // Below about a pixel there is nothing to average, and sampling anyway just
       // costs a little sharpness on a scene that is barely moving.
@@ -263,6 +273,8 @@ export interface PostFx {
    * can turn it off and compare, and so the reveal can stand it down.
    */
   setMotionBlur(amount: number): void;
+  /** How far the shutter is currently open, which follows the frame rate. */
+  shutter(): number;
   /** The velocity buffer, for a test to inspect what the blur is working from. */
   readVelocity(): { width: number; height: number; data: Float32Array };
   dispose(): void;
@@ -273,6 +285,42 @@ export function createPostFx(
   scene: THREE.Scene,
   camera: THREE.Camera,
 ): PostFx {
+/**
+ * How wide to open the shutter, given how long the frames are taking.
+ *
+ * A fixed shutter makes the smear strictly proportional to the distance covered,
+ * which sounds right and is not quite. What the eye reads as judder is the gap
+ * left *unexposed* between one frame's smear and the next one's, and with a fixed
+ * shutter that gap stays a fixed fraction of the step — so at 30fps it is twice as
+ * many pixels as at 60, and the throw still stutters more at the lower rate.
+ *
+ * Holding that gap constant instead is what makes the two look alike:
+ *
+ *   (1 - shutter) * delta = (1 - BASE) * REFERENCE
+ *
+ * which is the formula below. At 60fps it gives the 0.5 of a film camera's
+ * 180-degree shutter; at 30 it gives 0.75, at 15 it gives 0.88, and the smear
+ * comes out three times longer at 30fps than at 60 for the same die — twice the
+ * ground to cover, and a larger share of it covered. Above 60 it tapers off to a
+ * trace, because up there the gap is already smaller than the one being held.
+ */
+const SHUTTER = {
+  /** The frame rate the look is pinned to. */
+  REFERENCE: 1 / 60,
+  /** The shutter at that rate. */
+  BASE: 0.5,
+  /** Never quite nothing, and never the whole frame. */
+  LEAST: 0.15,
+  MOST: 0.95,
+  /**
+   * How quickly the shutter follows a change of frame rate. A rate is a rate and
+   * not one interval, so this tracks the sustained one: a lone hitched frame is
+   * already handled by the smear being as long as that frame's own displacement,
+   * and letting it swing the shutter as well would show up as a flash of smear.
+   */
+  FOLLOW: 0.2,
+};
+
   const size = renderer.getSize(new THREE.Vector2());
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
@@ -295,6 +343,7 @@ export function createPostFx(
   const previousViewProjection = new THREE.Matrix4();
   const currentViewProjection = new THREE.Matrix4();
   const viewMatrix = new THREE.Matrix4();
+  const clearColour = new THREE.Color();
   let havePreviousFrame = false;
 
   // Each object hands the velocity material its own last-frame transform as it is
@@ -341,6 +390,9 @@ export function createPostFx(
   composer.addPass(grade);
 
   let time = 0;
+  // Seeded at the reference rate so the first frames of a session are not blurred
+  // as if the whole app were running slowly.
+  let smoothedDelta = SHUTTER.REFERENCE;
 
   return {
     setSize(width, height, pixelRatio) {
@@ -359,6 +411,17 @@ export function createPostFx(
     render(delta) {
       time += delta;
       grade.uniforms.uTime.value = time;
+
+      // Follow the sustained frame rate, and open the shutter to hold the gap
+      // between one frame's exposure and the next at what it is at 60fps.
+      if (delta > 0) {
+        const follow = Math.min(1, delta / SHUTTER.FOLLOW);
+        smoothedDelta += (delta - smoothedDelta) * follow;
+      }
+      motionBlur.uniforms.uShutter.value = Math.min(
+        SHUTTER.MOST,
+        Math.max(SHUTTER.LEAST, 1 - ((1 - SHUTTER.BASE) * SHUTTER.REFERENCE) / smoothedDelta),
+      );
 
       // Velocity first, into its own target, before the composer touches the
       // frame — the blur pass needs it in hand by the time it runs.
@@ -383,11 +446,17 @@ export function createPostFx(
       renderer.shadowMap.autoUpdate = false;
       scene.overrideMaterial = velocityMaterial;
       const previousTarget = renderer.getRenderTarget();
+      // The clear colour is the renderer's, not this pass's, so it has to go back
+      // — leaving it set to transparent black would hand the next render a
+      // background it never asked for.
+      renderer.getClearColor(clearColour);
+      const clearAlpha = renderer.getClearAlpha();
       renderer.setRenderTarget(velocityTarget);
       renderer.setClearColor(0x000000, 0);
       renderer.clear(true, true, false);
       renderer.render(scene, camera);
       renderer.setRenderTarget(previousTarget);
+      renderer.setClearColor(clearColour, clearAlpha);
       scene.overrideMaterial = null;
       renderer.shadowMap.autoUpdate = shadowsAuto;
       scene.background = background;
@@ -410,6 +479,9 @@ export function createPostFx(
     },
     setMotionBlur(amount) {
       motionBlur.uniforms.uAmount.value = amount;
+    },
+    shutter() {
+      return motionBlur.uniforms.uShutter.value as number;
     },
     readVelocity() {
       const { width, height } = velocityTarget;

@@ -443,16 +443,41 @@ tray moves because the camera did, and a die that is both falling and being
 tracked gets the sum, with the rotation about its own centre included, which is
 most of what a thrown die is doing.
 
-The length is whatever actually happened between the last two frames, so this
-follows the frame rate by construction rather than by a constant. At 30fps a die
-covers twice the ground it covers at 60, so it gets twice the exposure. That is
-the point of it: the smear is exactly as long as the gap it has to bridge, which
-is why a slow frame stops reading as a jump instead of reading as a longer one.
-A ceiling of five percent of the frame height keeps a dropped frame from
-streaking, and the blur is faded out as the reveal closes in, since by then
-nothing is moving but the camera and all it could do is soften the numerals.
+The length is whatever actually happened between the last two frames, and the
+shutter on top of it opens wider as frames get longer. Proportional alone is not
+enough, and it is worth being precise about why.
 
-Three things had to be got right, and each was wrong first.
+What the eye reads as a stutter is not the smear, it is the gap left *unexposed*
+between one frame's smear and the next one's. With a fixed shutter that gap stays
+a fixed fraction of the step — so at 30fps it is twice as many pixels as at 60,
+and the throw still judders more at the lower rate however proportional the blur
+is. Holding that gap constant instead is what makes the two look alike:
+
+```
+(1 - shutter) * delta = (1 - BASE) * REFERENCE
+```
+
+At 60fps that gives 0.5, the 180-degree shutter of a film camera. At 30 it gives
+0.75, at 20 it gives 0.83, and above 60 it tapers off to a trace, because up there
+the gap is already smaller than the one being held. The smear that comes out is
+three times longer at 30fps than at 60 for the same die: twice the ground to cover
+per frame, and a larger share of it covered.
+
+Measured on a die crossing the screen at one fixed speed, the gap runs 7.1px at
+60fps, 8.2px at 30 and 11.4px at 20, where a fixed shutter over the same range
+runs 7.1px to 21.2px. The last of those is the ceiling binding rather than the
+formula failing: the smear is capped at five percent of the frame height so a
+dropped frame cannot streak, and at 20fps a die at that speed asks for more than
+the cap allows.
+
+The shutter follows a smoothed frame time rather than the last interval, because a
+rate is a rate and not one frame. A lone hitched frame is already covered by the
+smear being as long as that frame's own displacement, and letting it swing the
+shutter as well would show up as a flash of smear. The blur is faded out as the
+reveal closes in, since by then nothing is moving but the camera and all it could
+do is soften the numerals.
+
+Four things had to be got right, and each was wrong first.
 
 **The per-object uniform was uploaded once for the whole pass.** Every mesh is
 drawn with the same override material, and its last-frame transform is handed to
@@ -480,6 +505,16 @@ by every neighbourhood around it.
 is only refreshed inside the renderer's own `render()`, so taking it as it stands
 compares this frame's geometry against a view matrix one frame old, and puts a
 velocity on every static thing in the scene.
+
+**The search for a nearby smear has to reach as far as a smear can travel.** A
+pixel just outside a moving die has no velocity of its own, so the blur pass looks
+around for something whose exposure covers it — and that search originally reached
+three pixels, which is fine at 60fps and nowhere near enough once the shutter
+opens up. A 35px exposure came out 21px, clipped back to the die's own outline,
+and the shortfall grew with the length. It now searches a disc as wide as half the
+longest smear, since the exposure is centred, and lets a point claim a pixel only
+if its own smear actually covers the distance — which is what stops a fast die
+dragging its velocity onto scenery it never passed over.
 
 `npm run verify:blur` measures the thing being claimed rather than the presence
 of an effect. It poses the dice by hand with the app paused — writing a die's
@@ -509,6 +544,23 @@ which nothing moved has a velocity buffer of exactly zero, and that when one die
 moves, only about that die's worth of the buffer moves with it. That second one is
 what the uniform bug broke, and a picture alone could only say that something was
 wrong.
+
+And it runs the same die at 120, 60, 30 and 20fps and measures the gap each one
+leaves unblurred, which is the claim the shutter curve exists to make good. Those
+are the numbers quoted above.
+
+One note on `npm run verify:flakes`, which failed once during this work and sent
+me looking in the wrong place. It reports the worst of eighty samples taken on a
+die in whatever pose a random throw left it, and that statistic turns out to sit
+close enough to its own limit to cross it by chance: four runs gave 8.6%, 53.6%,
+16.5% and 24.7%, at a different grain each time, against a limit of 25%. The last
+of those was run with the motion blur pinned off, which is what rules the blur out
+— on a settled scene with the camera held it is a pass-through, and `verify:blur`
+shows a still frame coming back bit-identical with it on. The check now pins the
+blur off anyway, for the same reason it already pins the film grain and freezes
+the camera. What would actually fix it is seeding the throw so the pose is the
+same every run; the randomness is in the physics rather than in the check, so that
+is a larger change than it looks and it is not done.
 
 ## The sound
 

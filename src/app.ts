@@ -272,6 +272,7 @@ export class App {
       setGrain: (amount: number) => this.postFx.setGrain(amount),
       setMotionBlur: (amount: number) => this.postFx.setMotionBlur(amount),
       readVelocity: () => this.postFx.readVelocity(),
+      shutter: () => this.postFx.shutter(),
       freezeCamera: (frozen: boolean) => {
         this.cameraFrozen = frozen;
       },

@@ -42,9 +42,17 @@ const frames = (n) =>
     requestAnimationFrame(tick);
   }), n);
 
-/** Renders one frame with a die displaced by `shift` world units along x. */
-async function shot(shift, blur) {
-  await page.evaluate(({ shift, blur }) => {
+/**
+ * Renders one frame with a die displaced by `shift` world units along x, as if
+ * the frame had taken `delta` seconds.
+ *
+ * Rendered several times over rather than once: the shutter follows a smoothed
+ * frame time, so a single frame at a new rate would be caught mid-way between the
+ * old shutter and the new one. The pose does not change between the repeats, so
+ * the velocity is the same every time and only the smoothing moves.
+ */
+async function shot(shift, blur, delta = 1 / 60) {
+  await page.evaluate(async ({ shift, blur, delta }) => {
     const debug = window.dicer.debug;
     debug.setMotionBlur(blur);
     const meshes = debug.diceMeshes();
@@ -57,9 +65,19 @@ async function shot(shift, blur) {
       mesh.position.x += shift;
       mesh.updateMatrixWorld(true);
     }
-    debug.renderFrame(1 / 60);
-  }, { shift, blur });
-  const buffer = await page.screenshot({ type: 'png' });
+    // Render until the shutter stops moving. Yielding between frames matters:
+    // forty renders in one turn starves the compositor and the screenshot that
+    // follows times out waiting for a frame that is never composited.
+    let last = -1;
+    for (let i = 0; i < 90; i++) {
+      debug.renderFrame(delta);
+      const now = debug.shutter();
+      if (Math.abs(now - last) < 1e-4) break;
+      last = now;
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+  }, { shift, blur, delta });
+  const buffer = await page.screenshot({ type: 'png', timeout: 60000 });
   const { data, info } = await sharp(buffer).raw().toBuffer({ resolveWithObject: true });
   return { data, width: info.width, height: info.height, channels: info.channels };
 }
@@ -289,7 +307,7 @@ try {
     const blurred = await shot(shift, 1);
     const { best, curve } = bestFitExposure(sharp, blurred, band, 60);
     measured.push(best);
-    const predicted = shift * scale * 0.55;
+    const predicted = shift * scale * 0.5;
     // How much worse the fit is at nothing and at double, so the minimum is
     // visibly a minimum rather than a number that came out of a loop.
     const at = (length) => curve[Math.min(curve.length - 1, Math.max(0, Math.round(length)))].error;
@@ -326,11 +344,65 @@ try {
     bottom += (travelled[i] - meanX) ** 2;
   }
   const shutter = top / bottom;
-  console.log(`  across the sweep       the exposure runs ${shutter.toFixed(2)} of the distance covered, against 0.55 asked for`);
-  if (shutter < 0.35 || shutter > 0.8) {
+  console.log(`  across the sweep       the exposure runs ${shutter.toFixed(2)} of the distance covered, against the 0.50 of a 60fps frame`);
+  if (shutter < 0.3 || shutter > 0.75) {
     console.error(
-      `\n  FAIL the exposure is ${shutter.toFixed(2)} of the distance covered where the shutter is set to 0.55`,
+      `\n  FAIL the exposure is ${shutter.toFixed(2)} of the distance covered where the shutter at this rate is 0.50`,
     );
+    failed = true;
+  }
+
+  // --- the same throw at different frame rates must judder the same ----------
+  //
+  // This is the whole point of tying the shutter to the frame time. What the eye
+  // reads as a stutter is the gap left unexposed between one frame's smear and
+  // the next one's, so a die moving at a fixed speed should leave the same gap
+  // whatever the frame rate — covering twice the ground per frame at 30fps, and
+  // a larger share of it. A fixed shutter cannot do that: it holds the gap at a
+  // fixed fraction of the step, which is twice as many pixels at half the rate.
+  console.log('');
+  const speed = 6.0; // world units per second, held constant across the rates
+  const rates = [120, 60, 30, 20];
+  const gaps = [];
+  for (const fps of rates) {
+    const step = speed / fps;
+    const sharp = await shot(step, 0, 1 / fps);
+    const blurred = await shot(step, 1, 1 / fps);
+    const { best } = bestFitExposure(sharp, blurred, band, 60);
+    const travelledPx = step * scale;
+    const openTo = await page.evaluate(() => window.dicer.debug.shutter());
+    gaps.push(travelledPx - best);
+    const wanted = travelledPx * openTo;
+    console.log(
+      `  the same die at ${String(fps).padStart(3)}fps  travels ${travelledPx.toFixed(1).padStart(5)}px a frame, ` +
+        `shutter ${openTo.toFixed(2)}, exposure ${String(best).padStart(2)}px, ` +
+        `leaving a ${(travelledPx - best).toFixed(1).padStart(4)}px gap` +
+        (wanted > ceiling ? `  (the ${ceiling.toFixed(0)}px ceiling is binding here)` : ''),
+    );
+  }
+
+  // 120fps sits under the floor by design — up there the gap is already smaller
+  // than the one being held, so there is nothing to close and the shutter tapers
+  // off to a trace. The rates at and below the reference are the ones that must
+  // agree with each other.
+  const held = gaps.slice(1);
+  const widest = Math.max(...held);
+  const narrowest = Math.min(...held);
+  // What a fixed shutter would have left, for the comparison this is all about.
+  const fixed = rates.slice(1).map((fps) => (speed / fps) * scale * (1 - 0.5));
+  console.log(
+    `  across 60 to 20fps     the gap runs ${narrowest.toFixed(1)}px to ${widest.toFixed(1)}px, ` +
+      `where a fixed shutter would run ${Math.min(...fixed).toFixed(1)}px to ${Math.max(...fixed).toFixed(1)}px`,
+  );
+  if (widest - narrowest > 8) {
+    console.error(
+      `\n  FAIL the unblurred gap runs ${narrowest.toFixed(1)}px to ${widest.toFixed(1)}px across the frame rates — ` +
+        'a slow frame rate still judders more than a fast one',
+    );
+    failed = true;
+  }
+  if (gaps[1] <= 0 || gaps[2] <= 0) {
+    console.error('\n  FAIL the exposure covers the whole step, which is more blur than the motion calls for');
     failed = true;
   }
 

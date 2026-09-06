@@ -68,6 +68,11 @@ try {
   // buried the first version of this check under a flat noise floor four times
   // the size of anything the flakes were doing.
   await page.evaluate(() => window.dicer.debug.setGrain(0));
+  // And the motion blur, for the same reason. On a settled scene with the camera
+  // held it is a pass-through, so this should change nothing — but "should" is
+  // what this whole check exists to distrust, and anything that could differ
+  // between the two frames being compared is measured as the lattice moving.
+  await page.evaluate(() => window.dicer.debug.setMotionBlur(0));
   await frames(160);
   // And the camera never stops drifting either, which was worse: normalising
   // each step by a locally measured drift blew up wherever the drift passed
