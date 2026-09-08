@@ -856,6 +856,7 @@ the wrong thing:
 | `npm run verify:pwa` | rebuilds, then boots the installed app with the network cut |
 | `npm run calibrate` | regenerate the face contact sheets |
 | `npm run flakes` | contact sheet of flake settings on one settled die |
+| `npm run tonemap` | the same settled pool through each tone mapping operator, exposure-matched |
 | `npm run shoot` | screenshot the running app at each stage |
 | `npm run icons` | regenerate the launcher icons from the favicon |
 | `npm run fonts` | re-vendor the web fonts into `public/fonts/` |
