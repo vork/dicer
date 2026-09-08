@@ -300,7 +300,11 @@ try {
     bottom: Math.min(700, box.bottom),
   };
 
-  const sweep = [0.05, 0.10, 0.16, 0.22];
+  // In pixels, converted to world units through the measured scale, rather than
+  // in world units directly. Where the die settles decides how close the camera
+  // frames it, so a fixed world displacement is a different number of pixels
+  // every run — which made this check pass or fail on the throw.
+  const sweep = [7, 14, 22, 31].map((pixels) => pixels / scale);
   const measured = [];
   for (const shift of sweep) {
     const sharp = await shot(shift, 0);
@@ -312,7 +316,7 @@ try {
     // visibly a minimum rather than a number that came out of a loop.
     const at = (length) => curve[Math.min(curve.length - 1, Math.max(0, Math.round(length)))].error;
     console.log(
-      `  moved ${shift.toFixed(2)} units     best fit ${String(best).padStart(2)}px  ` +
+      `  moved ${(shift * scale).toFixed(0).padStart(2)}px       best fit ${String(best).padStart(2)}px  ` +
         `against ${predicted.toFixed(1).padStart(5)}px predicted   ` +
         `(fit error ${at(best).toFixed(2)} here, ${at(0).toFixed(2)} unblurred, ${at(best * 2).toFixed(2)} at double)`,
     );
@@ -361,7 +365,8 @@ try {
   // a larger share of it. A fixed shutter cannot do that: it holds the gap at a
   // fixed fraction of the step, which is twice as many pixels at half the rate.
   console.log('');
-  const speed = 6.0; // world units per second, held constant across the rates
+  // Held constant in pixels a frame at the reference rate, for the same reason.
+  const speed = (14 * 60) / scale;
   const rates = [120, 60, 30, 20];
   const gaps = [];
   for (const fps of rates) {
@@ -410,10 +415,13 @@ try {
   //
   // Kept small enough that the die is still in frame: at six units it left the
   // viewport altogether and the check passed on an empty picture.
-  const jump = 1.6;
+  // Far enough to be a jump, near enough that the die is still in frame: at a
+  // fixed 1.6 world units it left the viewport whenever the camera framed close,
+  // and the check then passed on an empty picture.
+  const jump = 150 / scale;
   const streak = changed(await shot(jump, 0), await shot(jump, 1));
   const allowed = (box.right - box.left) + ceiling * 2 + 30;
-  console.log(`  a jump of ${jump} units    spans ${streak.width}px, and must stay under ${allowed.toFixed(0)}px`);
+  console.log(`  a jump of ${(jump * scale).toFixed(0)}px      spans ${streak.width}px, and must stay under ${allowed.toFixed(0)}px`);
   if (streak.width === 0) {
     console.error('\n  FAIL nothing changed on the jump — the die is out of frame and this proves nothing');
     failed = true;

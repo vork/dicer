@@ -6,6 +6,7 @@ import { createEnvironment, createLights } from './scene/environment';
 import { createTray, TRAY } from './scene/tray';
 import { createDiceMaterial, type DiceMaterial, type FlakeSettings } from './scene/dice-material';
 import { createPostFx, type PostFx } from './scene/postfx';
+import { installGT7ToneMapping } from './scene/tonemap';
 import { DiceWorld } from './physics/dice-world';
 import { CameraDirector } from './camera-director';
 import { ThrowInput } from './input/throw-input';
@@ -75,8 +76,16 @@ export class App {
     this.renderer.setSize(window.innerWidth, window.innerHeight, false);
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.28;
+    // GT7's operator, not ACES. See src/scene/tonemap.ts for why, and
+    // tools/tonemap-curves.py for the measurement that decided it.
+    installGT7ToneMapping();
+    this.renderer.toneMapping = THREE.CustomToneMapping;
+    // Higher than the 1.28 ACES wanted, because GT7's SDR path maps a frame
+    // buffer where 1.0 is 100 nits up to a 250-nit paper white and scales back
+    // down. Chosen by matching the frame's median luminance to what ACES gave, so
+    // the swap changes colour rather than brightness — tools/tonemap-sheet.mjs
+    // does that search.
+    this.renderer.toneMappingExposure = 2.89;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     this.scene.background = new THREE.Color(0x050507);

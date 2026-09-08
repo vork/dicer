@@ -88,6 +88,119 @@ def neutral(c, exposure=1.0):
     return [min(1, max(0, v * (1 - g) + new_peak * g)) for v in c]
 
 
+# --- GT7 Tone Mapping ---------------------------------------------------------
+#
+# Transcribed from the MIT-licensed reference implementation in Polyphony's 2025
+# SIGGRAPH course notes, "Physically Based Tone Mapping in GT7". This is a
+# different animal from the 2017 GT curve above: that one is per-channel, and GT7
+# moved to colour volume mapping. It runs the per-channel curve to get a
+# deliberately hue-twisted result, converts both the original and the twisted
+# colour into a uniform colour space, takes the luminance from the twisted one and
+# the chroma from the original scaled by a fade, and blends the two in RGB. The
+# blend is the point: all-untwisted looks synthetic, all-twisted is a camera.
+#
+# It works in linear Rec.2020, and its SDR path assumes paper white at 250 nits
+# where sRGB's 1.0 is 100, so it maps up to 2.5 and scales back down by 0.4.
+
+REFERENCE_LUMINANCE = 100.0
+GT7_SDR_PAPER_WHITE = 250.0
+
+REC709_TO_REC2020 = [[0.6274, 0.3293, 0.0433], [0.0691, 0.9195, 0.0114], [0.0164, 0.0880, 0.8956]]
+REC2020_TO_REC709 = [[1.6605, -0.5876, -0.0728], [-0.1246, 1.1329, -0.0083], [-0.0182, -0.1006, 1.1187]]
+
+_M1, _C1, _C2, _C3, _PQC = 0.1593017578125, 0.8359375, 18.8515625, 18.6875, 10000.0
+
+
+def inverse_eotf_st2084(v, exponent_scale=1.0):
+    m2 = 78.84375 * exponent_scale
+    y = max(v * REFERENCE_LUMINANCE, 0.0) / _PQC
+    ym = pow(y, _M1)
+    return pow(2.0, m2 * (math.log2(_C1 + _C2 * ym) - math.log2(1.0 + _C3 * ym)))
+
+
+def eotf_st2084(n, exponent_scale=1.0):
+    m2 = 78.84375 * exponent_scale
+    n = min(1.0, max(0.0, n))
+    npow = pow(n, 1.0 / m2)
+    l = max(npow - _C1, 0.0) / (_C2 - _C3 * npow)
+    return pow(l, 1.0 / _M1) * _PQC / REFERENCE_LUMINANCE
+
+
+def rgb_to_ictcp(rgb):
+    """Input: linear Rec.2020."""
+    l = (rgb[0] * 1688.0 + rgb[1] * 2146.0 + rgb[2] * 262.0) / 4096.0
+    m = (rgb[0] * 683.0 + rgb[1] * 2951.0 + rgb[2] * 462.0) / 4096.0
+    s = (rgb[0] * 99.0 + rgb[1] * 309.0 + rgb[2] * 3688.0) / 4096.0
+    lp, mp, sp = (inverse_eotf_st2084(x) for x in (l, m, s))
+    return [
+        (2048.0 * lp + 2048.0 * mp) / 4096.0,
+        (6610.0 * lp - 13613.0 * mp + 7003.0 * sp) / 4096.0,
+        (17933.0 * lp - 17390.0 * mp - 543.0 * sp) / 4096.0,
+    ]
+
+
+def ictcp_to_rgb(ictcp):
+    i, ct, cp = ictcp
+    l = eotf_st2084(i + 0.00860904 * ct + 0.11103 * cp)
+    m = eotf_st2084(i - 0.00860904 * ct - 0.11103 * cp)
+    s = eotf_st2084(i + 0.560031 * ct - 0.320627 * cp)
+    return [
+        max(3.43661 * l - 2.50645 * m + 0.0698454 * s, 0.0),
+        max(-0.79133 * l + 1.9836 * m - 0.192271 * s, 0.0),
+        max(-0.0259499 * l - 0.0989137 * m + 1.12486 * s, 0.0),
+    ]
+
+
+def smooth_step(x, edge0, edge1):
+    if x < edge0:
+        return 0.0
+    if x > edge1:
+        return 1.0
+    t = (x - edge0) / (edge1 - edge0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+class GTToneMappingCurveV2:
+    """The GT curve with a convergent shoulder; the 2017 one did not reach its peak."""
+
+    def __init__(self, peak, alpha=0.25, mid=0.538, linear_section=0.444, toe=1.280):
+        self.peak, self.mid, self.linear_section, self.toe = peak, mid, linear_section, toe
+        k = (linear_section - 1.0) / (alpha - 1.0)
+        self.kA = peak * linear_section + peak * k
+        self.kB = -peak * k * math.exp(linear_section / k)
+        self.kC = -1.0 / (k * peak)
+
+    def evaluate(self, x):
+        if x < 0.0:
+            return 0.0
+        if x < self.linear_section * self.peak:
+            weight_linear = smooth_step(x, 0.0, self.mid)
+            toe_mapped = self.mid * pow(x / self.mid, self.toe) if x > 0 else 0.0
+            return (1.0 - weight_linear) * toe_mapped + weight_linear * x
+        return self.kA + self.kB * math.exp(x * self.kC)
+
+
+def gt7(c, exposure=1.0, blend_ratio=0.6, fade_start=0.98, fade_end=1.16):
+    c = [x * exposure for x in c]
+    rgb = mul(REC709_TO_REC2020, c)
+    fb_target = GT7_SDR_PAPER_WHITE / REFERENCE_LUMINANCE   # 2.5
+    sdr_correction = 1.0 / fb_target                        # 0.4
+    curve = GTToneMappingCurveV2(fb_target)
+    target_ucs = rgb_to_ictcp([fb_target] * 3)[0]
+
+    ucs = rgb_to_ictcp(rgb)
+    skewed = [curve.evaluate(x) for x in rgb]
+    skewed_ucs = rgb_to_ictcp(skewed)
+    chroma_scale = 1.0 - smooth_step(ucs[0] / target_ucs, fade_start, fade_end)
+    scaled = ictcp_to_rgb([skewed_ucs[0], ucs[1] * chroma_scale, ucs[2] * chroma_scale])
+
+    blended = [
+        sdr_correction * min((1.0 - blend_ratio) * skewed[i] + blend_ratio * scaled[i], fb_target)
+        for i in range(3)
+    ]
+    return [min(1, max(0, x)) for x in mul(REC2020_TO_REC709, blended)]
+
+
 def srgb(v):
     return 12.92 * v if v <= 0.0031308 else 1.055 * pow(v, 1 / 2.4) - 0.055
 
@@ -113,7 +226,7 @@ if __name__ == '__main__':
         ('ACES (now)', aces, 1.28),
         ('Khronos Neutral', neutral, 1.81),
         ('GT per channel', gt_per_channel, 1.11),
-        ('GT, chroma kept', gt_hue_safe, 1.11),
+        ('GT7', gt7, 1.0),
     ]
     print('  a warm tinted glint as it gets brighter, at exposures matched on the real frame')
     print('  saturation of the result, and how far its hue has moved from 32 degrees\n')

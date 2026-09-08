@@ -425,6 +425,66 @@ without that the first die in the pool would always leave from the same place
 relative to the heading, so the pool's slots could not be independent by
 construction, only by measurement.
 
+## Tone mapping
+
+The dice are tinted specular — metallic flake glints and a warm key on polished
+resin — and that is exactly what a per-channel tone mapping curve destroys. Every
+per-channel operator clips one channel before the others, so a saturated highlight
+does not fade toward white as it brightens, it slides toward whichever primary
+survives longest. Measured on a warm glint, ACES takes it from 0.44 saturation to
+0.04 over four stops.
+
+The operator here is **GT7 Tone Mapping**, from Polyphony Digital's 2025 SIGGRAPH
+course notes, transcribed from their MIT-licensed reference implementation. It is
+not the GT curve of 2017, and the distinction is the whole point: that one is
+per-channel, and GT7 moved to colour volume mapping specifically to stop the hue
+twist. It runs the per-channel curve anyway to get a deliberately twisted result,
+converts both the original and the twisted colour into a uniform colour space
+(ICtCp), keeps the luminance of the twisted one and the chroma of the original,
+fades that chroma out as luminance approaches the display peak, and blends the two
+back in RGB at 0.6. The blend is deliberate — all-untwisted reads synthetic,
+all-twisted is a camera, and they wanted some of both.
+
+Measured on a warm glint at exposures matched on the real frame:
+
+| linear | ACES | Khronos Neutral | GT per channel | GT7 |
+| --- | --- | --- | --- | --- |
+| 1x | 0.28 / 38° | 0.44 / 30° | 0.46 / 38° | 0.54 / 31° |
+| 2x | 0.15 / 40° | 0.32 / 28° | 0.30 / 50° | 0.51 / 31° |
+| 4x | 0.07 / 40° | 0.21 / 26° | 0.10 / 57° | 0.42 / 41° |
+| 8x | 0.04 / 40° | 0.13 / 25° | 0.01 / 60° | 0.09 / 60° |
+
+Saturation, then how far the hue has moved from 32 degrees. The GT curve is worse
+than ACES for hue, not better — it reaches pure yellow at 60 degrees, because
+channels clip one at a time. GT7 holds both through the range this scene occupies
+and whitens only at the very top, which is correct: a highlight at the display's
+peak really is white.
+
+I got this wrong the first time and it is worth recording why. Asked about "the
+GT7 tone mapper" I tested Uchimura's 2017 GT curve, found it no better than ACES,
+and said so. They are different operators by the same authors, eight years apart,
+and the newer one exists precisely because the older one had the fault I was
+measuring.
+
+On the real frame the effect is smaller than the table suggests, because the scene
+never gets hot: peak luminance 0.953 under ACES, nothing clipping, and 0.016% of
+the frame above 0.8. The paper says as much itself — at correct exposure the
+operators show "few noticeable differences", and the gaps open at +2 stops. What
+it does buy here is the dice keeping their blue instead of washing toward pale
+white, and numerals reading as warm rather than stark. `npm run tonemap` renders
+one settled pool through every operator, exposure-matched, so this is a look you
+can check rather than take on trust.
+
+Two practical notes. The exposure is 2.89 rather than the 1.28 ACES wanted,
+because GT7's SDR path assumes paper white at 250 nits where sRGB's 1.0 is 100, so
+it maps up to 2.5 and scales back down; the figure comes from matching the frame's
+median luminance so the swap changes colour and not brightness. And the cost is
+real — six inverse-PQ and three forward-PQ evaluations a pixel, each a
+pow/log2/exp2 chain, in one fullscreen pass. That is worth watching on a phone. I
+could not measure it here: under software rendering it times at 96ms a frame
+against 0.3ms for ACES, which is a fact about swiftshader's transcendentals and
+tells you nothing about a GPU.
+
 ## Motion blur
 
 A thrown die crosses a good part of the screen in a frame, and a frame is a
@@ -857,6 +917,7 @@ the wrong thing:
 | `npm run calibrate` | regenerate the face contact sheets |
 | `npm run flakes` | contact sheet of flake settings on one settled die |
 | `npm run tonemap` | the same settled pool through each tone mapping operator, exposure-matched |
+| `python3 tools/tonemap-curves.py` | what each operator does to a tinted highlight, exactly |
 | `npm run shoot` | screenshot the running app at each stage |
 | `npm run icons` | regenerate the launcher icons from the favicon |
 | `npm run fonts` | re-vendor the web fonts into `public/fonts/` |

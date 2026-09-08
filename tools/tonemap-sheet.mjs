@@ -131,6 +131,7 @@ try {
         agx: THREE.AgXToneMapping,
         neutral: THREE.NeutralToneMapping,
         cineon: THREE.CineonToneMapping,
+        gt7: THREE.CustomToneMapping,
       };
       renderer.toneMapping = modes[name];
       renderer.toneMappingExposure = exposure;
@@ -141,6 +142,7 @@ try {
     { name: 'neutral', label: 'Khronos PBR Neutral' },
     { name: 'agx', label: 'AgX' },
     { name: 'cineon', label: 'Cineon' },
+    { name: 'gt7', label: 'GT7 (Polyphony, 2025)' },
   ];
 
   // What the current setting produces, which everything else is matched to.
