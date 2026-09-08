@@ -3,3 +3,4 @@ dist/
 .calibration/
 *.local
 .DS_Store
+tools/__pycache__/
