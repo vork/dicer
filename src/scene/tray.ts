@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { createFeltMaps, createLeatherMaps } from './textures';
+import { applyFloorAoUv, createTrayFloorAo } from './tray-ao';
 
 /**
  * Tray dimensions in world units. One unit is roughly 20mm — the scale the asset
@@ -106,7 +107,12 @@ export function createTray(): Tray {
   });
 
   const floorShape = roundedRect(inner.w, inner.d, TRAY.innerFillet);
-  const floor = new THREE.Mesh(new THREE.ShapeGeometry(floorShape, 24), floorMaterial);
+  const floorGeometry = new THREE.ShapeGeometry(floorShape, 24);
+  // The felt's own UVs are world coordinates so the grain tiles; the occlusion
+  // map must not tile, so it gets a set of its own. `aoMap` reads uv1 by default.
+  applyFloorAoUv(floorGeometry, inner.w, inner.d);
+  floorMaterial.aoMap = createTrayFloorAo(inner.w, inner.d, TRAY.wallHeight);
+  const floor = new THREE.Mesh(floorGeometry, floorMaterial);
   floor.rotation.x = -Math.PI / 2;
   floor.position.y = TRAY.floorY;
   floor.receiveShadow = true;

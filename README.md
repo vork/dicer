@@ -425,6 +425,58 @@ without that the first die in the pool would always leave from the same place
 relative to the heading, so the pool's slots could not be independent by
 construction, only by measurement.
 
+## Ambient occlusion
+
+The tray is a box, so felt near a wall can see less of the room than felt in the
+middle and should receive less ambient light for it. It did not. With every direct
+light silenced, 30% of the felt's brightness was ambient — and that share was flat
+at 30% everywhere, hard against the walls exactly as much as out in the open. A
+floor that does not darken toward its own walls reads as a painted rectangle, and
+that is what it looked like.
+
+Nothing here needs a screen-space pass to fix that. The tray never moves, and it
+is a box open at the top, so how much of the room a point on the felt can see is
+just how much of the opening it can see — and the fraction of a diffuse surface's
+hemisphere subtended by a parallel rectangle is a form factor with a closed form.
+Four arctangents a texel, no rays, no noise, no bake time:
+
+```
+F = 1/2π · [ X/√(1+X²) · atan(Y/√(1+X²)) + Y/√(1+Y²) · atan(X/√(1+Y²)) ]
+```
+
+summed over the four corner rectangles the point stands under. Checked against
+400,000 cosine-weighted samples per point, it agrees to 0.002, which is the Monte
+Carlo's own noise. The middle of this tray sees 0.84 of an open sky, a point
+against a long wall 0.58, a corner 0.39.
+
+The map is normalised so the most open point is 1. The absolute figure is below 1
+everywhere — the middle really does receive only 84% of an open sky — but applying
+that raw would darken the whole floor by a sixth and undo lighting that was tuned
+without it. The gradient is the part that was missing.
+
+`npm run verify:ao` measures it by switching the occlusion off and on at the same
+points, under the same lights, with the same camera, and taking the ratio. Reading
+the edge of the floor against its middle does not work: the environment is a room
+with a key panel on one side, so ambient is not uniform across the felt to begin
+with, and the far edge is foreshortened enough that a pixel of error is half a unit
+of floor. Both cancel in a ratio taken at a fixed point. Measured against the same
+closed form computed independently in the check, it lands within 0.04 across the
+floor — 1.00 at the middle, 0.73 at x=5.0, 0.61 against the wall.
+
+One thing this cost an hour: `Texture.channel` defaults to 0 whatever the map is
+for. The felt's own UVs are world coordinates so its grain tiles, and the occlusion
+map must not tile, so it has a `uv1` of its own — but an `aoMap` left alone samples
+channel 0 regardless, which here clamped to one edge texel and returned a constant.
+It measured as a flat 0.32 across the entire floor, which looks exactly like a
+working occlusion map until you plot it against position.
+
+The dice get nothing from this and need nothing. Every one of them is convex to
+within a millionth of a unit — checked by testing every hull vertex against every
+face plane — and a convex solid cannot occlude itself; the numerals are painted
+rather than engraved, so there is no small detail to catch shadow either. What
+grounds a die on the felt is its contact shadow, and the key light's shadow map
+draws that at 228 texels per world unit.
+
 ## Tone mapping
 
 The dice are tinted specular — metallic flake glints and a warm key on polished
@@ -912,6 +964,7 @@ the wrong thing:
 | `npm run sound:roll` | render a whole physics roll beside a recording of one |
 | `npm run verify:flakes` | the sparkle does not jump as the camera closes in |
 | `npm run verify:blur` | the smear matches the distance a die covered in the frame |
+| `npm run verify:ao` | the felt darkens toward the walls by what the geometry says |
 | `npm run verify:build` | rebuilds, then runs the built site from a sub-path with no 404s |
 | `npm run verify:pwa` | rebuilds, then boots the installed app with the network cut |
 | `npm run calibrate` | regenerate the face contact sheets |

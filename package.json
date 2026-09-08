@@ -26,6 +26,7 @@
     "verify:build": "npm run build && node tools/verify-build.mjs",
     "verify:flakes": "node tools/verify-flakes.mjs",
     "verify:blur": "node tools/verify-blur.mjs",
+    "verify:ao": "node tools/verify-ao.mjs",
     "verify:pwa": "npm run build && node tools/verify-pwa.mjs",
     "calibrate": "node tools/calibrate.mjs --set set7 --mode face --zoom 0.62",
     "flakes": "node tools/flake-sheet.mjs",
