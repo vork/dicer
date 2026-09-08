@@ -95,7 +95,7 @@ const shot = async () => sharp(await page.screenshot({ type: 'png', timeout: 600
 let failed = false;
 try {
   await page.goto('http://127.0.0.1:5222/', { waitUntil: 'load' });
-  await page.waitForFunction('window.dicer && window.dicer.debug', { timeout: 120000 });
+  await page.waitForFunction('window.dicer && window.dicer.debug', null, { timeout: 120000 });
   await page.waitForFunction(() => {
     const l = document.getElementById('loader');
     return !l || l.classList.contains('done');
@@ -115,7 +115,7 @@ try {
 
   await page.evaluate((p) => window.dicer.debug.setPool(p), pool);
   await page.evaluate(() => window.dicer.debug.roll(0.15, -1, 0.72));
-  await page.waitForFunction('window.dicer.debug.state().settled === true', { polling: 250, timeout: 300000 });
+  await page.waitForFunction('window.dicer.debug.state().settled === true', null, { polling: 250, timeout: 300000 });
   await page.evaluate(() => window.dicer.debug.holdReveal(true));
   await page.evaluate(() => window.dicer.debug.setGrain(0));
   await frames(120);

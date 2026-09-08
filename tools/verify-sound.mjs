@@ -112,7 +112,7 @@ function spectrum(samples, sampleRate) {
 let failed = false;
 try {
   await page.goto('http://127.0.0.1:5206/', { waitUntil: 'load' });
-  await page.waitForFunction('window.dicer && window.dicer.debug', { timeout: 120000 });
+  await page.waitForFunction('window.dicer && window.dicer.debug', null, { timeout: 120000 });
 
   const rendered = await page.evaluate(async () => {
     const { DiceAudio } = await import('/src/audio.ts');

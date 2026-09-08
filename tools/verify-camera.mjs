@@ -24,7 +24,7 @@ page.on('pageerror', (e) => console.error('[page error]', e.message));
 let failed = false;
 try {
   await page.goto('http://127.0.0.1:5193/tools/verify-camera.html', { waitUntil: 'load' });
-  await page.waitForFunction('window.__done === true', { timeout: 60000 });
+  await page.waitForFunction('window.__done === true', null, { timeout: 60000 });
   const { lines, failures } = await page.evaluate('window.__result');
   console.log(lines.join('\n'));
   if (failures.length) {

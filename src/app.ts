@@ -68,7 +68,11 @@ export class App {
     this.canvas = canvas;
     this.renderer = new THREE.WebGLRenderer({
       canvas,
-      antialias: true,
+      // Off deliberately. It only multisamples the default frame buffer, and with
+      // the composer in the chain nothing is ever drawn there — it cost a
+      // multisampled buffer nobody wrote to. The antialiasing that matters is on
+      // the composer's own target, in scene/postfx.ts.
+      antialias: false,
       powerPreference: 'high-performance',
       stencil: false,
     });
@@ -280,6 +284,7 @@ export class App {
         this.postFx.setBloom(strength, radius, threshold),
       setGrain: (amount: number) => this.postFx.setGrain(amount),
       setMotionBlur: (amount: number) => this.postFx.setMotionBlur(amount),
+      samplesReport: () => this.postFx.samplesReport(),
       readVelocity: () => this.postFx.readVelocity(),
       shutter: () => this.postFx.shutter(),
       freezeCamera: (frozen: boolean) => {

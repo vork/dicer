@@ -42,12 +42,13 @@ try {
         const loader = document.getElementById('loader');
         return !loader || loader.classList.contains('done');
       },
+      null,
       { timeout: 180000 },
     );
 
     await page.evaluate(() => window.dicer.debug.setPool(['d20', 'd6', 'd6']));
     await page.evaluate(() => window.dicer.debug.roll(0, -1, 0.7));
-    await page.waitForFunction('window.dicer.debug.state().settled === true', { timeout: 180000 });
+    await page.waitForFunction('window.dicer.debug.state().settled === true', null, { timeout: 180000 });
     // Hold the close-up open, then give the dolly time to arrive.
     await page.evaluate(() => window.dicer.debug.holdReveal(true));
     await page.evaluate(

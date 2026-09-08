@@ -41,7 +41,7 @@ page.on('pageerror', (e) => console.error('[page error]', e.message));
 
 const url = `http://127.0.0.1:5199/tools/calibrate.html?set=${setId}&mode=${mode}&spin=${spin}&zoom=${args.zoom || 1.25}`;
 await page.goto(url, { waitUntil: 'load' });
-await page.waitForFunction('window.__done === true', { timeout: 120000 });
+await page.waitForFunction('window.__done === true', null, { timeout: 120000 });
 
 const sheets = await page.evaluate('window.__sheets');
 for (const [die, dataUrl] of Object.entries(sheets)) {

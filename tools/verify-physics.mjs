@@ -50,7 +50,7 @@ try {
       .catch(() => {});
   }, 5000);
   try {
-    await page.waitForFunction('window.__done === true', { timeout: 3600000 });
+    await page.waitForFunction('window.__done === true', null, { timeout: 3600000 });
   } finally {
     clearInterval(progress);
     process.stderr.write('\r');

@@ -57,7 +57,7 @@ const frames = (n) =>
 
 try {
   await page.goto('http://127.0.0.1:5196/', { waitUntil: 'load' });
-  await page.waitForFunction('window.dicer && window.dicer.debug', { timeout: 120000 });
+  await page.waitForFunction('window.dicer && window.dicer.debug', null, { timeout: 120000 });
   // The loader fades out and then removes itself, so "visible and .done" is a
   // race; accept either state.
   await page.waitForFunction(
@@ -65,6 +65,7 @@ try {
       const loader = document.getElementById('loader');
       return !loader || loader.classList.contains('done');
     },
+    null,
     { timeout: 180000 },
   );
 
@@ -89,7 +90,7 @@ try {
   await frames(14);
   await shot('midroll');
 
-  await page.waitForFunction('window.dicer.debug.state().settled === true', { timeout: 180000 });
+  await page.waitForFunction('window.dicer.debug.state().settled === true', null, { timeout: 180000 });
   // Headless frames are slow enough that the 2.4s close-up expires back to the
   // idle framing before a screenshot lands, which made these stills a picture of
   // the wrong camera. Hold it open, and give the dolly time to arrive.

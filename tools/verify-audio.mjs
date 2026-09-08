@@ -49,7 +49,7 @@ const rollWithMouse = async () => {
   await page.mouse.down();
   await page.mouse.move(500, 220, { steps: 6 });
   await page.mouse.up();
-  await page.waitForFunction('window.dicer.debug.state().settled === true', { timeout: 180000 });
+  await page.waitForFunction('window.dicer.debug.state().settled === true', null, { timeout: 180000 });
   const after = await page.evaluate(() => window.__audio.sources);
   return after - before;
 };
@@ -61,6 +61,7 @@ try {
       const loader = document.getElementById('loader');
       return !loader || loader.classList.contains('done');
     },
+    null,
     { timeout: 180000 },
   );
   await page.evaluate(() => window.dicer.debug.setPool(['d20', 'd6', 'd6']));

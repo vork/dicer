@@ -273,6 +273,14 @@ export interface PostFx {
    * can turn it off and compare, and so the reveal can stand it down.
    */
   setMotionBlur(amount: number): void;
+  /**
+   * What the buffers the scene is drawn into are actually backed by. The
+   * renderer's own `antialias` flag says nothing useful once a composer is in the
+   * chain — it was true while the picture had no antialiasing at all — so this
+   * reports both the setting and whether a multisampled frame buffer was really
+   * allocated for it.
+   */
+  samplesReport(): { samples: number; multisampledFrameBuffer: boolean }[];
   /** How far the shutter is currently open, which follows the frame rate. */
   shutter(): number;
   /** The velocity buffer, for a test to inspect what the blur is working from. */
@@ -322,7 +330,24 @@ const SHUTTER = {
 };
 
   const size = renderer.getSize(new THREE.Vector2());
-  const composer = new EffectComposer(renderer);
+
+  // Multisampled, which the composer's own buffer is not.
+  //
+  // `antialias: true` on the renderer only ever applies to the default frame
+  // buffer, and with a composer in the chain nothing is drawn there — every pass
+  // writes into these targets and the last one blits to the screen. So the
+  // renderer dutifully allocated a 4x multisampled frame buffer that was never
+  // drawn to, while the actual picture had no antialiasing at all: measured over
+  // a settled frame, 52% of its high-contrast edges moved in a single pixel.
+  //
+  // EffectComposer takes a target to use instead of building its own, and clones
+  // it for the second buffer, carrying `samples` across. Only the geometry pass
+  // needs it — everything after runs on the resolved texture.
+  const multisampled = new THREE.WebGLRenderTarget(size.x, size.y, {
+    type: THREE.HalfFloatType,
+    samples: 4,
+  });
+  const composer = new EffectComposer(renderer, multisampled);
   composer.addPass(new RenderPass(scene, camera));
 
   // Velocity is signed and often far below a 255th, so it needs a float target;
@@ -480,6 +505,13 @@ const SHUTTER = {
     setMotionBlur(amount) {
       motionBlur.uniforms.uAmount.value = amount;
     },
+    samplesReport() {
+      const properties = (renderer as unknown as { properties: { get(o: object): Record<string, unknown> } }).properties;
+      return [composer.renderTarget1, composer.renderTarget2].map((target) => ({
+        samples: target.samples,
+        multisampledFrameBuffer: Boolean(properties.get(target).__webglMultisampledFramebuffer),
+      }));
+    },
     shutter() {
       return motionBlur.uniforms.uShutter.value as number;
     },
@@ -493,6 +525,7 @@ const SHUTTER = {
     },
     dispose() {
       bloom.dispose();
+      multisampled.dispose();
       velocityTarget.dispose();
       velocityMaterial.dispose();
       composer.dispose();

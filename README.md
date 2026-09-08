@@ -425,6 +425,58 @@ without that the first die in the pool would always leave from the same place
 relative to the heading, so the pool's slots could not be independent by
 construction, only by measurement.
 
+## Antialiasing
+
+There was none, and everything said there was. The renderer was built with
+`antialias: true`, and the default frame buffer genuinely carried four MSAA
+samples — but with an `EffectComposer` in the chain nothing is ever drawn to the
+default frame buffer. Every pass writes into the composer's own buffers, which
+three creates as `new WebGLRenderTarget(w, h, { type: HalfFloatType })` with no
+`samples` at all, and the last pass blits to the screen. So the renderer
+faithfully allocated a multisampled surface nobody wrote to, while the picture had
+hard edges: measured over a settled frame, 52% of its high-contrast edges moved in
+a single pixel.
+
+`EffectComposer` takes a render target to use instead of building its own, and
+clones it for the second buffer carrying `samples` across, so the fix is to hand it
+one with `samples: 4`. Only the geometry pass needs it — bloom, the blur and the
+grade all run on the resolved texture afterwards. `antialias` on the renderer is
+now explicitly off, since it can only ever have applied to a surface this app does
+not draw to.
+
+`npm run verify:aa` checks the buffers the scene is actually drawn into, and asks
+not just what they are configured for but whether a multisampled frame buffer was
+allocated for them — which is precisely the part a setting cannot promise, and
+precisely how this went unnoticed. It reports the frame's edge statistics too, but
+does not assert on them: multisampling antialiases geometry coverage and nothing
+else, and most of the high-contrast edges in this frame are painted numerals,
+flake glints and normal-mapped leather, which stay exactly as hard however many
+samples the buffer has. Demanding a low figure there would be demanding something
+MSAA cannot do.
+
+I tried to assert on a before-and-after instead — toggling the sample count at
+runtime and comparing the same frame — and it is not in the check because it was
+not reliable. Two runs showed the edges softening as they should and a third
+showed no change at all, because tearing a render target down and rebuilding it
+underneath a running loop does not reliably give you the same frame twice. The
+structural check does not have that problem.
+
+Worth knowing that on a phone or any retina display `setPixelRatio(min(dpr, 2))`
+is already supersampling and the browser downscales, which hides a good deal of
+this. On a 1x display there was nothing at all, which is what the headless check
+measures.
+
+Multisampling also cost enough under software rendering to expose a second thing,
+which had been wrong in every tool here for as long as they have existed.
+Playwright's signature is `waitForFunction(pageFunction, arg, options)`, so every
+`waitForFunction(fn, { timeout: 180000 })` in `tools/` was handing the options
+object over as the page function's *argument* and running on the default
+thirty-second timeout. Nothing had ever taken longer than thirty seconds, so
+nothing ever failed — until a slower frame pushed a settle wait past it, and a
+check that believed it would wait three minutes gave up in thirty seconds. All 32
+of them now pass `null` in between and have the timeout they were written to
+have.
+
 ## Ambient occlusion
 
 The tray is a box, so felt near a wall can see less of the room than felt in the
@@ -965,6 +1017,7 @@ the wrong thing:
 | `npm run verify:flakes` | the sparkle does not jump as the camera closes in |
 | `npm run verify:blur` | the smear matches the distance a die covered in the frame |
 | `npm run verify:ao` | the felt darkens toward the walls by what the geometry says |
+| `npm run verify:aa` | the buffers the scene is drawn into are really multisampled |
 | `npm run verify:build` | rebuilds, then runs the built site from a sub-path with no 404s |
 | `npm run verify:pwa` | rebuilds, then boots the installed app with the network cut |
 | `npm run calibrate` | regenerate the face contact sheets |

@@ -170,7 +170,7 @@ function changed(a, b) {
 let failed = false;
 try {
   await page.goto('http://127.0.0.1:5219/', { waitUntil: 'load' });
-  await page.waitForFunction('window.dicer && window.dicer.debug', { timeout: 120000 });
+  await page.waitForFunction('window.dicer && window.dicer.debug', null, { timeout: 120000 });
   await page.waitForFunction(() => {
     const l = document.getElementById('loader');
     return !l || l.classList.contains('done');
@@ -178,7 +178,7 @@ try {
 
   await page.evaluate(() => window.dicer.debug.setPool(['d20']));
   await page.evaluate(() => window.dicer.debug.roll(0, -1, 0.7));
-  await page.waitForFunction('window.dicer.debug.state().settled === true', { polling: 250, timeout: 300000 });
+  await page.waitForFunction('window.dicer.debug.state().settled === true', null, { polling: 250, timeout: 300000 });
   await page.evaluate(() => window.dicer.debug.holdReveal(true));
   // Grain reseeds every frame and the camera never stops drifting; either one
   // would swamp a comparison of two frames. Same reason as verify:flakes.

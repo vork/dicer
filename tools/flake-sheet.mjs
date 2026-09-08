@@ -57,12 +57,13 @@ const frames = (n) =>
 
 try {
   await page.goto('http://127.0.0.1:5198/', { waitUntil: 'load' });
-  await page.waitForFunction('window.dicer && window.dicer.debug', { timeout: 120000 });
+  await page.waitForFunction('window.dicer && window.dicer.debug', null, { timeout: 120000 });
   await page.waitForFunction(
     () => {
       const loader = document.getElementById('loader');
       return !loader || loader.classList.contains('done');
     },
+    null,
     { timeout: 180000 },
   );
 
@@ -82,7 +83,7 @@ try {
   if (!patched.patched) throw new Error('the flake shader patch never reached a compiled program');
 
   await page.evaluate(() => window.dicer.debug.roll(0, -1, 0.7));
-  await page.waitForFunction('window.dicer.debug.state().settled === true', { timeout: 180000 });
+  await page.waitForFunction('window.dicer.debug.state().settled === true', null, { timeout: 180000 });
   await page.evaluate(() => window.dicer.debug.holdReveal(true));
   await frames(140);
 

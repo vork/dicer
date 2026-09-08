@@ -53,7 +53,7 @@ const frames = (n) =>
 let failed = false;
 try {
   await page.goto('http://127.0.0.1:5202/', { waitUntil: 'load' });
-  await page.waitForFunction('window.dicer && window.dicer.debug', { timeout: 120000 });
+  await page.waitForFunction('window.dicer && window.dicer.debug', null, { timeout: 120000 });
   await page.waitForFunction(() => {
     const l = document.getElementById('loader');
     return !l || l.classList.contains('done');
@@ -61,7 +61,7 @@ try {
 
   await page.evaluate((p) => window.dicer.debug.setPool(p), pool);
   await page.evaluate(() => window.dicer.debug.roll(0, -1, 0.7));
-  await page.waitForFunction('window.dicer.debug.state().settled === true', { polling: 250, timeout: 300000 });
+  await page.waitForFunction('window.dicer.debug.state().settled === true', null, { polling: 250, timeout: 300000 });
   await page.evaluate(() => window.dicer.debug.holdReveal(true));
   // The grade reseeds its film grain every frame, so with it running, the
   // difference between two frames is the grain and almost nothing else — it

@@ -26,6 +26,7 @@ try {
       const loader = document.getElementById('loader');
       return !loader || loader.classList.contains('done');
     },
+    null,
     { timeout: 180000 },
   );
   await page.waitForTimeout(1500);

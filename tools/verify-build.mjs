@@ -45,13 +45,14 @@ try {
       const loader = document.getElementById('loader');
       return !loader || loader.classList.contains('done');
     },
+    null,
     { timeout: 180000 },
   );
   console.log(`loaded from ${prefix}`);
 
   await page.evaluate(() => window.dicer.debug.setPool(['d20', 'd6']));
   await page.evaluate(() => window.dicer.debug.roll(0, -1, 0.7));
-  await page.waitForFunction('window.dicer.debug.state().settled === true', { timeout: 180000 });
+  await page.waitForFunction('window.dicer.debug.state().settled === true', null, { timeout: 180000 });
   const state = await page.evaluate(() => window.dicer.debug.state());
   console.log('rolled:', JSON.stringify(state.values));
 

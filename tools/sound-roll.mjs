@@ -170,7 +170,7 @@ const page = await browser.newPage();
 page.on('pageerror', (e) => console.error('[page error]', e.message));
 try {
   await page.goto('http://127.0.0.1:5213/tools/sound-roll.html', { waitUntil: 'commit' });
-  await page.waitForFunction('window.__ready === true', { timeout: 120000 });
+  await page.waitForFunction('window.__ready === true', null, { timeout: 120000 });
 
   const clips = [];
   for (const f of process.argv.slice(2)) {
