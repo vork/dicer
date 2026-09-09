@@ -12,15 +12,16 @@
  *
  * Everything in the height field is wear:
  *
- * - The relief's edges are rounded, on the raised side of every outline, by a
- *   quarter-circle profile off the distance to the outline. This is the single
+ * - The relief is domed, and its edges are rounded on the raised side of every
+ *   outline, by profiles off the distance to the outline. This is the single
  *   thing that most says "old": a freshly struck coin has crisp edges, and a
  *   coin that has been in pockets for a lifetime has none. The foot of each
  *   wall gets a small concave fillet on the field side. The rim's outer edge
  *   and the edge's top and bottom are rounded the same way.
- * - Dents: shallow round bowls, most on the metal that has taken the knocks.
+ * - Dents: shallow bowls of no particular shape.
  * - Nicks in the rim: short deep cuts.
- * - Scratches: hundreds of thin shallow grooves of every length and direction.
+ * - Scratches: hundreds of thin shallow grooves of every length and direction,
+ *   a third of them swipes of several parallel hairlines.
  * - Casting porosity: sparse pinpoint pits.
  *
  * The scratch and dent masks ride in the blue and (inverted) alpha channels
@@ -215,11 +216,25 @@ function groove(height, mask, maskWeight, size, texel, wrapX, ax, ay, bx, by, ha
   }
 }
 
-/** Stamps a round bowl. */
-function bowl(height, mask, maskWeight, size, wrapX, cx, cy, radius, depth) {
-  for (let py = Math.max(0, Math.floor(cy - radius)); py <= Math.min(size.height - 1, Math.ceil(cy + radius)); py++) {
-    for (let px = Math.floor(cx - radius); px <= Math.ceil(cx + radius); px++) {
-      const d = Math.hypot(px - cx, py - cy) / radius;
+/**
+ * Stamps a bowl. Not a round one: its outline wanders by up to a third of its
+ * radius around three harmonics, and it may be stretched, because a dent is
+ * the shape of whatever struck it, and nothing that strikes a coin is round.
+ */
+function bowl(height, mask, maskWeight, size, wrapX, cx, cy, radius, depth, random) {
+  const wobble = [1, 2, 3].map((k) => ({ k, amplitude: (random ? random() : 0) * 0.12, phase: (random ? random() : 0) * Math.PI * 2 }));
+  const stretch = random ? 1 + random() * 0.8 : 1;
+  const heading = random ? random() * Math.PI : 0;
+  const cosH = Math.cos(heading), sinH = Math.sin(heading);
+  const reach = radius * stretch * 1.4;
+  for (let py = Math.max(0, Math.floor(cy - reach)); py <= Math.min(size.height - 1, Math.ceil(cy + reach)); py++) {
+    for (let px = Math.floor(cx - reach); px <= Math.ceil(cx + reach); px++) {
+      const dx = px - cx, dy = py - cy;
+      const ex = (dx * cosH + dy * sinH) / stretch, ey = -dx * sinH + dy * cosH;
+      const angle = Math.atan2(ey, ex);
+      let r = 1;
+      for (const w of wobble) r += w.amplitude * Math.cos(w.k * angle + w.phase);
+      const d = Math.hypot(ex, ey) / (radius * r);
       if (d >= 1) continue;
       const profile = (1 - d * d) * (1 - d * d);
       const x = wrapX ? ((px % size.width) + size.width) % size.width : px;
@@ -273,6 +288,8 @@ export function bakeFace({ raised, size, extent, rim, seed }) {
   const ROUND = 0.02;
   const FILLET = 0.01;
   const RIM_ROUND = 0.03;
+  const DOME = 0.012;
+  const DOME_WIDTH = 0.05;
   for (let py = 0; py < size; py++) {
     const z = ((py + 0.5) / size) * 2 * extent - extent;
     for (let px = 0; px < size; px++) {
@@ -282,9 +299,16 @@ export function bakeFace({ raised, size, extent, rim, seed }) {
       if (r > rim + 0.02) continue;
       let h = 0;
       if (raised[i]) {
-        h += rounding(intoRaised[i] * texel, ROUND);
+        const inFromOutline = Math.min(intoRaised[i] * texel, rim - r);
+        h += rounding(inFromOutline, ROUND);
         // The rim's outer edge.
         h += rounding(rim - r, RIM_ROUND);
+        // Struck relief is not a flat plate on a flat field: the die's engraving
+        // is convex, so every stroke of the design swells from its edges to a
+        // crown along its middle, and the rim likewise. An extrusion with a
+        // level top read as cut out of sheet, whatever was done to its edges.
+        const t = Math.min(1, inFromOutline / DOME_WIDTH);
+        h += DOME * t * t * (3 - 2 * t);
       } else {
         // A concave fillet at the foot: the surface rises to meet the wall.
         const d = intoField[i] * texel;
@@ -304,7 +328,7 @@ export function bakeFace({ raised, size, extent, rim, seed }) {
 
   // Scratches: many, thin, shallow, every length and direction. Favouring the
   // exposed metal a little, since the field is sheltered by the relief.
-  for (let n = 0; n < 220; n++) {
+  for (let n = 0; n < 170; n++) {
     const a = random() * Math.PI * 2;
     const r = Math.sqrt(random()) * rim;
     const x = Math.cos(a) * r, z = Math.sin(a) * r;
@@ -317,6 +341,22 @@ export function bakeFace({ raised, size, extent, rim, seed }) {
     const ex = x + Math.cos(direction) * length, ez = z + Math.sin(direction) * length;
     if (!inCoin(x, z)) continue;
     groove(height, scratches, 0.5, grid, texel, false, toTexel(x), toTexel(z), toTexel(ex), toTexel(ez), halfWidth, depth);
+    // A third of them are a swipe, not a single line: a few parallel hairlines
+    // a texel or two apart, of differing lengths, the mark of a coin dragged
+    // across grit. The most characteristic mark on a handled coin.
+    if (random() < 0.35) {
+      const lines = 2 + Math.floor(random() * 4);
+      const nx = -Math.sin(direction), nz = Math.cos(direction);
+      for (let k = 1; k <= lines; k++) {
+        const offset = k * (0.002 + random() * 0.003) * (random() < 0.5 ? -1 : 1);
+        const trim = random() * 0.4;
+        const sx = x + nx * offset + Math.cos(direction) * length * trim * random();
+        const sz = z + nz * offset + Math.sin(direction) * length * trim * random();
+        const fx = ex + nx * offset - Math.cos(direction) * length * trim * random();
+        const fz = ez + nz * offset - Math.sin(direction) * length * trim * random();
+        groove(height, scratches, 0.4, grid, texel, false, toTexel(sx), toTexel(sz), toTexel(fx), toTexel(fz), halfWidth * (0.6 + random() * 0.6), depth * (0.5 + random() * 0.6));
+      }
+    }
   }
   // Dents.
   for (let n = 0; n < 70; n++) {
@@ -325,7 +365,7 @@ export function bakeFace({ raised, size, extent, rim, seed }) {
     const x = Math.cos(a) * r, z = Math.sin(a) * r;
     const radius = (0.008 + random() ** 2 * 0.028) / texel;
     const depth = 0.003 + random() * 0.008;
-    bowl(height, dents, 1, grid, false, toTexel(x), toTexel(z), radius, depth);
+    bowl(height, dents, 1, grid, false, toTexel(x), toTexel(z), radius, depth, random);
   }
   // Nicks on the rim.
   for (let n = 0; n < 14; n++) {
@@ -342,7 +382,7 @@ export function bakeFace({ raised, size, extent, rim, seed }) {
     const a = random() * Math.PI * 2;
     const r = Math.sqrt(random()) * rim;
     const x = Math.cos(a) * r, z = Math.sin(a) * r;
-    bowl(height, dents, 0.6, grid, false, toTexel(x), toTexel(z), (0.002 + random() * 0.003) / texel, 0.002 + random() * 0.002);
+    bowl(height, dents, 0.6, grid, false, toTexel(x), toTexel(z), (0.002 + random() * 0.003) / texel, 0.002 + random() * 0.002, random);
   }
 
   return encode(height, scratches, dents, size, size, texel, texel, false);
@@ -370,15 +410,15 @@ export function bakeEdge({ width, height: rows, rim, top, seed }) {
     }
   }
   // Rubbed around the circumference: long shallow grooves along u.
-  for (let n = 0; n < 90; n++) {
+  for (let n = 0; n < 60; n++) {
     const u = random() * width;
     const v = random() * rows;
-    const length = (0.05 + random() ** 2 * 0.6) / texelU;
+    const length = (0.04 + random() ** 2 * 0.4) / texelU;
     const drift = (random() - 0.5) * 0.15;
     groove(height, scratches, 0.5, grid, texelU, true, u, v, u + length, v + drift * length, (0.002 + random() * 0.003) / texelV, 0.0005 + random() ** 2 * 0.0015);
   }
   for (let n = 0; n < 30; n++) {
-    bowl(height, dents, 1, grid, true, random() * width, random() * rows, (0.004 + random() ** 2 * 0.01) / texelV, 0.0015 + random() * 0.003);
+    bowl(height, dents, 1, grid, true, random() * width, random() * rows, (0.004 + random() ** 2 * 0.01) / texelV, 0.0015 + random() * 0.003, random);
   }
 
   return encode(height, scratches, dents, width, rows, texelU, texelV, true);

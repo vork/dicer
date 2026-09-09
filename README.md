@@ -460,18 +460,27 @@ to it since it was struck, and all of that follows the shape:
 - Over that, toning: the reddish-brown film old gold takes on, in soft patches,
   thickest in the sheltered field.
 - And the surface itself, from a normal map baked by the asset build
-  (`tools/coin-surface.mjs`). Every edge of the relief is rounded off, on the
-  raised side of every outline, by an elliptical profile off the distance to the
-  outline — the single thing that most says "old", since a freshly struck coin
-  has crisp edges and a coin that has spent a lifetime in pockets has none — and
-  the foot of every wall gets a small fillet. The rim's outer edge and the
-  coin's edge are rounded the same way, which is also what the physics does to
+  (`tools/coin-surface.mjs`). The model is an extrusion — a level plate on a
+  level field, with vertical walls — and an extrusion reads as cut out of sheet
+  whatever is done to its colour. Struck relief is convex: the die's engraving
+  swells from its edges to a crown along the middle of every stroke. So the map
+  domes every raised region off the distance to its outline, rounds every edge
+  off on the raised side by an elliptical profile — a freshly struck coin has
+  crisp edges and a coin that has spent a lifetime in pockets has none — and
+  gives the foot of every wall a small fillet. The rim is domed and rounded the
+  same way, and so is the coin's edge, which is also what the physics does to
   the rim. Over that: a couple of hundred shallow scratches of every length and
   direction, shallow because a hairline is seen by its highlight rather than its
-  depth, dents, nicks in the rim, pinpoint pores; and, computed rather than
-  baked, the strike's slow swell and the metal's fine grain. The scratch and
-  dent masks ride in the map's spare channels and roughen and darken their
-  floors.
+  depth, a third of them swipes of several parallel hairlines a texel or two
+  apart, which is the most characteristic mark on a handled coin; dents whose
+  outlines wander around three harmonics and stretch, since nothing that strikes
+  a coin is round; nicks in the rim; pinpoint pores; and, computed rather than
+  baked, the strike's slow swell and enough grain that no patch of the metal is
+  a perfect mirror, because a perfect mirror reflects the room as the room and
+  reads as chrome plating. The scratch and dent masks ride in the map's spare
+  channels and roughen and darken their floors.
+- Old gold is not one yellow: the recesses run warmer and deeper, the rubbed
+  metal paler, and the whole field sees less of the room than the high points.
 
 The map stores slopes rather than normals: how much the surface rises per unit
 along each of the two directions it is sampled by. A slope is the same number
@@ -521,10 +530,24 @@ this room is the near-black shell. The rougher field gathered a little of the ke
 softbox from the side; the polished relief mirrored the dark exactly. Resin never
 minded, because most of what you see of a die is its own colour. So the coin has
 its own copy of the room with a reflector in it — a warm card high up behind the
-tray, brighter toward the top, which is exactly what a product photograph of a
-coin hangs behind it — and the field is toned well below the relief on top of
-that. The same effect is why pits cannot simply be rough: here a rough patch of
-gold is a bright one, so a pit is dark metal instead.
+tray, which is exactly what a product photograph of a coin hangs behind it — and
+the field is toned well below the relief on top of that. The card alone reflected
+as one soft blob, and metal under one soft blob looks like plastic: what says
+metal is a crisp highlight with an edge to it, sliding over every curve. So the
+card is dim and carries two narrow bright strips, the way a studio hangs strip
+lights, and every domed and rounded edge of the relief picks them up as a line
+of light. The same effect is why pits cannot simply be rough: here a rough patch
+of gold is a bright one, so a pit is dark metal instead.
+
+The domed edges brought one more thing with them. They face every direction, so
+somewhere along their length they find the exact mirror angle of the spotlight,
+and a lobe as tight as polished gold's returns it at tens of times the
+brightness of anything else in the frame: 388 pixels of the probe's coin sat
+above twenty units of radiance, where the bloom pass starts at about one. The
+coin's direct specular now runs through a soft knee at six units, which the tone
+curve was rendering as white anyway, and the count is zero. The environment's
+strips are left alone; they are the highlights that say metal, and they never
+get that hot.
 
 And the reflector then blew the relief out to cream. Gold is only gold below the
 tone curve's shoulder: its reflectance is 1.0, 0.71, 0.29, and past the shoulder

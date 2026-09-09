@@ -61,9 +61,8 @@ export interface CoinSettings {
 
 export const DEFAULT_COIN: CoinSettings = {
   grime: 0.85,
-  // Below about 0.18 the rubbed patches stop reading as worn and start reading
-  // as wet.
-  polish: 0.2,
+  // The floor of the roughness; the shader will not go below 0.25 anyway.
+  polish: 0.25,
   wear: 0.8,
   scratches: 0.8,
   patina: 0.8,
@@ -174,7 +173,10 @@ float coinFbm(vec3 p) {
 // normal. Sampled in the coin's own space so it turns with the metal.
 float coinSwell(vec3 p) {
   return 0.004 * (coinFbm(p * 3.0 + vec3(4.0, 1.0, 7.0)) - 0.5)
-    + 0.0004 * (coinNoise(p * 40.0 + vec3(9.0, 3.0, 2.0)) - 0.5);
+    // Grain: enough that no patch of the metal is a perfect mirror. A perfect
+    // mirror reflects the room as the room, and reads as chrome plating.
+    + 0.0009 * (coinNoise(p * 38.0 + vec3(9.0, 3.0, 2.0)) - 0.5)
+    + 0.0004 * (coinNoise(p * 90.0 + vec3(1.0, 8.0, 5.0)) - 0.5);
 }
 
 // The surface map's four channels, decoded: slopes along the two sampling
@@ -249,6 +251,9 @@ vec3 coinU = normalize(mix(vCoinX, -vCoinTangent, coinSideness));
 vec3 coinV = normalize(mix(vCoinZ, vCoinAxis, coinSideness));
 
 vec3 coinBase = uCoinGold;
+// Old gold is not one yellow. The recesses run warmer and deeper — the toning
+// and the dirt that never quite leaves them — and the rubbed metal paler.
+coinBase *= mix(vec3(1.0), vec3(0.88, 0.72, 0.5), 0.55 * coinCavity);
 // Dull metal is a shade darker and greyer than the polished: its surface is
 // scattering rather than reflecting, and gold's colour is in its reflection.
 coinBase = mix(coinBase, coinBase * vec3(0.62, 0.66, 0.72), 0.45 * coinDull);
@@ -275,8 +280,15 @@ const COIN_FRAGMENT_ROUGHNESS = /* glsl */ `
 roughnessFactor = mix(uCoinPolish, 0.78, coinDull);
 roughnessFactor = mix(roughnessFactor, uCoinPolish, 0.45 * coinExposed * (1.0 - coinDull));
 roughnessFactor += 0.28 * coinScratch + 0.3 * coinPit + 0.14 * coinPatina;
+// And a mottle finer than the wear map, so the sheen never runs smooth for
+// long: a rubbed patch is rubbed unevenly.
+roughnessFactor += 0.09 * (coinFbm(coinP * 22.0 + vec3(7.0, 5.0, 3.0)) - 0.5);
 roughnessFactor = mix(roughnessFactor, 0.85, coinGrime);
-roughnessFactor = clamp(roughnessFactor, 0.05, 0.95);
+// Never a true mirror. Below about 0.25 the domed edges of the relief, which
+// face every direction, find the exact mirror angle of the spotlight somewhere
+// along their length and return it at hundreds of times the rest of the frame;
+// the bloom pass then spreads that over the whole tray and washes it pale.
+roughnessFactor = clamp(roughnessFactor, 0.25, 0.95);
 `;
 
 const COIN_FRAGMENT_METALNESS = /* glsl */ `
@@ -293,11 +305,27 @@ normal = normalize(normal - coinU * coinSlopeU - coinV * coinSlopeV);
 `;
 
 /**
+ * Runs after lights_fragment_end. The spot and key lights are small and bright,
+ * and a lobe as tight as polished gold's returns them at tens of times the
+ * brightness of anything else in the frame from the domed edges of the relief,
+ * which face every direction and so find the mirror angle somewhere along
+ * their length. The tone curve renders anything past a few units as white
+ * regardless, so a soft knee there costs the coin nothing you can see; without
+ * it, the bloom pass spread those glints over the whole tray and washed the felt
+ * pale. The environment's strips are not touched: those are the highlights that
+ * say metal, and they are never this hot.
+ */
+const COIN_FRAGMENT_LIGHTS = /* glsl */ `
+reflectedLight.directSpecular = reflectedLight.directSpecular / (1.0 + reflectedLight.directSpecular / 6.0);
+`;
+
+/**
  * Runs after aomap_fragment. The foot of a wall sees less of the room than the
  * open field does, and for a metal the room is nearly all of its light.
  */
 const COIN_FRAGMENT_AO = /* glsl */ `
-float coinOcclusion = 1.0 - 0.6 * coinRecessShade;
+// And the whole field sees less of the room than the high points do.
+float coinOcclusion = (1.0 - 0.6 * coinRecessShade) * (1.0 - 0.25 * coinCavity);
 reflectedLight.indirectDiffuse *= coinOcclusion;
 reflectedLight.indirectSpecular *= coinOcclusion;
 `;
@@ -327,7 +355,7 @@ export function createCoinMaterial(settings?: Partial<CoinSettings>, halfThickne
     uCoinPits: { value: coin.pits },
     // Linear, since it is written straight into the shader: gold's reflectance is
     // about this, and it is the colour the metal actually is rather than a tint.
-    uCoinGold: { value: new THREE.Color(1.0, 0.71, 0.29) },
+    uCoinGold: { value: new THREE.Color(1.0, 0.76, 0.34) },
     uCoinGrimeColor: { value: new THREE.Color(0.05, 0.035, 0.02) },
     uCoinPatinaColor: { value: new THREE.Color(0.34, 0.16, 0.06) },
   };
@@ -340,7 +368,7 @@ export function createCoinMaterial(settings?: Partial<CoinSettings>, halfThickne
     // it (see createEnvironment). Measured in the probe: at 0.8 the relief was
     // already past the tone curve's shoulder and reading as pale cream, at 0.5
     // it is gold.
-    envMapIntensity: 0.55,
+    envMapIntensity: 0.5,
   });
 
   material.onBeforeCompile = (shader) => {
@@ -354,6 +382,7 @@ export function createCoinMaterial(settings?: Partial<CoinSettings>, halfThickne
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>\n${COIN_FRAGMENT_ROUGHNESS}`)
       .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>\n${COIN_FRAGMENT_METALNESS}`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>\n${COIN_FRAGMENT_NORMAL}`)
+      .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>\n${COIN_FRAGMENT_LIGHTS}`)
       .replace('#include <aomap_fragment>', `#include <aomap_fragment>\n${COIN_FRAGMENT_AO}`);
   };
   // A key of its own, so three does not hand this material a program cached for

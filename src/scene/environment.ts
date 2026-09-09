@@ -66,9 +66,22 @@ function buildEnvironmentScene(reflector = false): THREE.Scene {
   // one big soft source where the flat faces look, brighter toward the top, so
   // the field carries a sweep of light and every edge of the relief turns
   // through it. The dice keep the plain room.
+  //
+  // Not one card, though. A single broad card reflected as one soft blob, and
+  // metal under one soft blob looks like plastic: what says metal is a crisp
+  // highlight with an edge to it, sliding over every curve. So the card is
+  // dimmer and carries two narrow bright strips, the way a product studio
+  // hangs strip lights, and every rounded edge of the relief picks them up as
+  // a line of light.
   if (reflector) {
-    add(panel(0xfff1dc, 2.6), [0, 11, -7.5], [18, 0.2, 9], [-0.55, 0, 0]);
-    add(panel(0xffe2b8, 0.9), [0, 5.5, -12], [18, 5, 0.2], [-0.15, 0, 0]);
+    //
+    // The strips are bright next to the card, not bright outright: at seven
+    // they mirrored in the coin at four times anything else in the frame and the
+    // bloom pass washed the whole tray pale.
+    add(panel(0xffe9cc, 0.9), [0, 11, -7.5], [18, 0.2, 9], [-0.55, 0, 0]);
+    add(panel(0xfff6e6, 3.2), [0, 12.5, -5.5], [16, 0.2, 0.9], [-0.5, 0, 0]);
+    add(panel(0xfff0d6, 2.0), [0, 8.5, -11], [16, 0.2, 0.7], [-0.75, 0, 0]);
+    add(panel(0xffe2b8, 0.6), [0, 5.5, -12], [18, 5, 0.2], [-0.15, 0, 0]);
   }
 
   return scene;
