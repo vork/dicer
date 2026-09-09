@@ -17,10 +17,17 @@ import * as THREE from 'three';
  *   between them everything in between. That variation, more than any colour,
  *   is what says the metal is old.
  * - Over that, toning — the reddish-brown film old gold takes on, in soft
- *   patches, thickest where the field is sheltered — and the scratches: three
- *   families of hairlines in different directions across the faces, rubbed
- *   around the circumference on the edge, each a fine groove in the metal that
- *   is rougher along its floor. And dents, the odd small pit.
+ *   patches, thickest where the field is sheltered.
+ * - And the surface itself, from a baked slope map (see tools/coin-surface.mjs):
+ *   every edge of the relief rounded off by a lifetime in pockets, the rim's
+ *   edge and the coin's edge rounded the same way, hundreds of shallow
+ *   scratches at every length and angle, dents, nicks in the rim, pinpoint
+ *   pores. The map stores slopes rather than normals, so one map serves the
+ *   faces sampled by x and z and, as a strip, the edge sampled by angle and y;
+ *   the shader tilts the geometric normal by the slopes along the matching
+ *   tangents. The strike's slow swell and the fine grain of the metal are
+ *   computed here, as height differences, since baked they cost more bytes than
+ *   the rest of the map together.
  *
  * Almost none of it is a texture. The asset pipeline stores how deep into a recess
  * each vertex sits in the UV slot (the coin has no texture to put there), bakes
@@ -29,12 +36,12 @@ import * as THREE from 'three';
  * coin's own object space, so it is locked to the metal and turns with it. The
  * relief depth itself is measured off the model at build time.
  *
- * None of it glitters. Every feature that is switched on by a threshold — a
- * scratch, a dent — is switched on across the width of a pixel rather than at a
- * point, using the derivative of the noise it comes from, and no feature is
- * finer than a couple of pixels at the reveal's framing. A pattern finer than a
- * pixel does not draw as a pattern; it draws as sparkle that crawls when the
- * camera moves, and the first version of this coin did exactly that.
+ * None of it glitters. The slope map is mipmapped, and slopes average correctly
+ * under filtering, so a scratch that is narrower than a pixel fades to a faint
+ * tilt rather than flickering; the procedural grain is kept coarser than a pixel
+ * at the reveal's framing. A pattern finer than a pixel does not draw as a
+ * pattern; it draws as sparkle that crawls when the camera moves, and the first
+ * version of this coin did exactly that.
  */
 
 export interface CoinSettings {
@@ -44,11 +51,11 @@ export interface CoinSettings {
   polish: number;
   /** How much of the surface the polish never reached: the spread of the roughness. */
   wear: number;
-  /** Strength and density of the hairline scratches. */
+  /** How much the scratches roughen and tilt the metal. */
   scratches: number;
   /** Reddish-brown toning in soft patches. */
   patina: number;
-  /** Small dents and pits. */
+  /** How much the dents, nicks and pores roughen and darken the metal. */
   pits: number;
 }
 
@@ -78,6 +85,8 @@ export interface CoinMaterial {
  */
 const COIN_WEAR_EXTENT = 0.7;
 const COIN_WEAR_RANGE = 0.25;
+/** Slopes in the surface maps are stored as a fraction of this; see coin-surface.mjs. */
+const COIN_SLOPE_MAX = 1.5;
 
 const COIN_VERTEX_PARS = /* glsl */ `
 varying vec3 vCoinPosition;
@@ -85,6 +94,8 @@ varying vec2 vCoinUv;
 varying vec3 vCoinRadial;
 varying vec3 vCoinAxis;
 varying vec3 vCoinTangent;
+varying vec3 vCoinX;
+varying vec3 vCoinZ;
 `;
 
 const COIN_VERTEX = /* glsl */ `
@@ -96,28 +107,39 @@ vec3 coinRadialObject = normalize(vec3(position.x, 0.0, position.z) + vec3(1e-5,
 vCoinRadial = normalize(normalMatrix * coinRadialObject);
 vCoinAxis = normalize(normalMatrix * vec3(0.0, 1.0, 0.0));
 vCoinTangent = normalize(normalMatrix * cross(vec3(0.0, 1.0, 0.0), coinRadialObject));
+vCoinX = normalize(normalMatrix * vec3(1.0, 0.0, 0.0));
+vCoinZ = normalize(normalMatrix * vec3(0.0, 0.0, 1.0));
 `;
 
 const COIN_FRAGMENT_PARS = /* glsl */ `
 #define COIN_WEAR_EXTENT ${COIN_WEAR_EXTENT.toFixed(3)}
 #define COIN_WEAR_RANGE ${COIN_WEAR_RANGE.toFixed(3)}
+#define COIN_SLOPE_MAX ${COIN_SLOPE_MAX.toFixed(3)}
 varying vec3 vCoinPosition;
 varying vec2 vCoinUv;
 varying vec3 vCoinRadial;
 varying vec3 vCoinAxis;
 varying vec3 vCoinTangent;
+varying vec3 vCoinX;
+varying vec3 vCoinZ;
 uniform float uCoinGrime;
 uniform float uCoinPolish;
 uniform float uCoinWearAmount;
 uniform float uCoinScratches;
 uniform float uCoinPatina;
 uniform float uCoinPits;
+uniform float uCoinHalfThickness;
 uniform vec3 uCoinGold;
 uniform vec3 uCoinGrimeColor;
 uniform vec3 uCoinPatinaColor;
 // Distance to the nearest wall foot as a fraction of COIN_WEAR_RANGE, in r for
 // the heads face and g for tails, over ±COIN_WEAR_EXTENT of the coin's x and z.
 uniform sampler2D uCoinWearMap;
+// The faces' surface, heads in the left half and tails in the right, over the
+// same extent: slopes along x and z in r and g, scratches in b, dents in a
+// (inverted). And the edge's, around the circumference by y across it.
+uniform sampler2D uCoinSurfaceMap;
+uniform sampler2D uCoinEdgeMap;
 
 float coinHash(vec3 p) {
   p = fract(p * 0.3183099 + 0.1);
@@ -147,49 +169,18 @@ float coinFbm(vec3 p) {
   return sum;
 }
 
-// A threshold that switches on over the width of a pixel rather than at a
-// point. This is the whole difference between a scratch and a sparkle.
-float coinEdge(float value, float threshold) {
-  float width = fwidth(value);
-  return smoothstep(threshold - width, threshold + width, value);
+// The strike's slow swell and the metal's grain, as a height at a point. Read
+// at the point and a small step along two tangents, the differences tilt the
+// normal. Sampled in the coin's own space so it turns with the metal.
+float coinSwell(vec3 p) {
+  return 0.004 * (coinFbm(p * 3.0 + vec3(4.0, 1.0, 7.0)) - 0.5)
+    + 0.0004 * (coinNoise(p * 40.0 + vec3(9.0, 3.0, 2.0)) - 0.5);
 }
 
-// One family of hairlines across a face: noise stretched long in one direction
-// and squeezed fine across it, so where it crosses the threshold it crosses in
-// thin streaks. Any fine variation in y stops the streak at the edge of the
-// face rather than smearing it down the coin's side.
-float coinFaceLines(vec3 p, vec2 direction, float seed, float threshold) {
-  vec2 q = vec2(dot(p.xz, direction), dot(p.xz, vec2(-direction.y, direction.x)));
-  // Bent a little by a slow warp, so no two scratches are quite parallel and
-  // none is quite straight. Ruled dead straight in three directions they read
-  // as cross-hatching, not as wear.
-  q.y += 0.06 * (coinFbm(vec3(q.x * 1.7, q.y * 1.7, seed)) - 0.5);
-  float n = coinNoise(vec3(q.x * 5.5, q.y * 46.0, p.y * 46.0 + seed));
-  return coinEdge(n, threshold);
-}
-
-// Hairlines around the edge: slow around the circumference, fine along the
-// axis, so they run as bands around the rim the way a coin's edge is rubbed.
-float coinEdgeLines(vec3 p, float seed, float threshold) {
-  float n = coinNoise(vec3(p.x * 4.0, p.y * 60.0 + seed, p.z * 4.0));
-  return coinEdge(n, threshold);
-}
-
-// Everything that is cut into the metal, as a height (positive is a groove), at
-// one point. Called three times: here, and a little way along two directions
-// across the surface, which is what tilts the normal into the grooves. The
-// scratches and dents at the centre are handed back for the roughness and colour.
-float coinRelief(vec3 p, float sideness, float exposed, out float scratch, out float pit) {
-  float faces = max(
-    max(coinFaceLines(p, vec2(0.96, 0.28), 1.3, 0.81), coinFaceLines(p, vec2(-0.42, 0.91), 7.1, 0.82)),
-    max(0.8 * coinFaceLines(p, vec2(0.6, -0.8), 4.4, 0.82), 0.45 * coinFaceLines(p, vec2(0.2, 0.98), 2.6, 0.72))
-  );
-  float edge = max(0.7 * coinEdgeLines(p, 3.3, 0.76), 0.4 * coinEdgeLines(p, 8.8, 0.68));
-  scratch = uCoinScratches * mix(faces, edge, sideness);
-  // Dents: soft blobs a few pixels across, most of them on the exposed metal
-  // that has taken the knocks.
-  pit = uCoinPits * coinEdge(coinFbm(p * 26.0 + vec3(5.0, 2.0, 9.0)), 0.71) * (0.5 + 0.5 * exposed);
-  return 0.6 * scratch + 1.0 * pit;
+// The surface map's four channels, decoded: slopes along the two sampling
+// directions in coin units per unit, and the two damage masks.
+vec4 coinDecodeSurface(vec4 texel) {
+  return vec4((texel.rg * 2.0 - 1.0) * COIN_SLOPE_MAX, texel.b, 1.0 - texel.a);
 }
 `;
 
@@ -234,18 +225,28 @@ float coinPatina = uCoinPatina
   * smoothstep(0.42, 0.72, coinFbm(coinP * 3.4 + vec3(11.0, 2.0, 5.0)) + 0.15 * coinFoot)
   * (0.35 + 0.65 * coinCavity);
 
-// Scratches and dents, and the slope of them across the surface.
-float coinScratch;
-float coinPit;
-float coinDummyScratch;
-float coinDummyPit;
-float coinH0 = coinRelief(coinP, coinSideness, coinExposed, coinScratch, coinPit);
-vec3 coinAcrossObject = normalize(mix(coinRadialObject, vec3(0.0, 1.0, 0.0), coinSideness));
-float coinH1 = coinRelief(coinP + coinAcrossObject * 0.003, coinSideness, coinExposed, coinDummyScratch, coinDummyPit);
-float coinH2 = coinRelief(coinP + coinTangentObject * 0.003, coinSideness, coinExposed, coinDummyScratch, coinDummyPit);
-float coinSlopeAcross = coinH1 - coinH0;
-float coinSlopeAlong = coinH2 - coinH0;
-vec3 coinAcross = normalize(mix(vCoinRadial, vCoinAxis, coinSideness));
+// The surface. On the faces the map is read by x and z, heads from the left
+// half of the atlas and tails from the right; the edge reads its strip by the
+// angle around the coin and by y. Where a wall of the relief runs from face to
+// edge the two are blended by how far the normal has turned.
+vec2 coinFaceUv = vec2(coinWearUv.x * 0.5 + (coinP.y > 0.0 ? 0.0 : 0.5), coinWearUv.y);
+vec4 coinFace = coinDecodeSurface(texture2D(uCoinSurfaceMap, coinFaceUv));
+float coinAngle = atan(coinP.z, coinP.x);
+vec2 coinEdgeUv = vec2(coinAngle / (2.0 * PI) + 0.5, coinP.y / (2.0 * uCoinHalfThickness) + 0.5);
+vec4 coinEdgeS = coinDecodeSurface(texture2D(uCoinEdgeMap, coinEdgeUv));
+vec4 coinSurface = mix(coinFace, coinEdgeS, coinSideness);
+float coinScratch = uCoinScratches * coinSurface.z;
+float coinPit = uCoinPits * coinSurface.w;
+
+// The swell and grain, as height differences over a fixed step across the
+// surface, in the two directions the map's slopes are read along.
+vec3 coinAcrossObject = normalize(mix(vec3(1.0, 0.0, 0.0), -coinTangentObject, coinSideness));
+vec3 coinAlongObject = normalize(mix(vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 0.0), coinSideness));
+float coinH0 = coinSwell(coinP);
+float coinSlopeU = coinSurface.x + (coinSwell(coinP + coinAcrossObject * 0.004) - coinH0) / 0.004;
+float coinSlopeV = coinSurface.y + (coinSwell(coinP + coinAlongObject * 0.004) - coinH0) / 0.004;
+vec3 coinU = normalize(mix(vCoinX, -vCoinTangent, coinSideness));
+vec3 coinV = normalize(mix(vCoinZ, vCoinAxis, coinSideness));
 
 vec3 coinBase = uCoinGold;
 // Dull metal is a shade darker and greyer than the polished: its surface is
@@ -253,8 +254,9 @@ vec3 coinBase = uCoinGold;
 coinBase = mix(coinBase, coinBase * vec3(0.62, 0.66, 0.72), 0.45 * coinDull);
 coinBase = mix(coinBase, uCoinPatinaColor, 0.75 * coinPatina);
 coinBase = mix(coinBase, uCoinGrimeColor, coinGrime);
-// The floor of a dent has lost its polish.
+// The floor of a dent has lost its polish, and a scratch shows fresher metal.
 coinBase *= 1.0 - 0.35 * coinPit;
+coinBase *= 1.0 + 0.05 * coinScratch;
 // The rubbed high points are a shade brighter than the rest, and the field is
 // toned below them. Measured in the probe, a field left as bright as the relief
 // came out at 180 to the relief's 137 out of 255, since its rougher metal
@@ -284,10 +286,10 @@ metalnessFactor = mix(1.0, 0.12, coinGrime);
 `;
 
 const COIN_FRAGMENT_NORMAL = /* glsl */ `
-// Into the grooves. The slope is a height difference over a fixed step in the
-// coin's own space, not a screen-space derivative, so a scratch is the same
-// groove at any distance rather than a sharper one the further away it is.
-normal = normalize(normal - coinAcross * coinSlopeAcross * 0.32 - vCoinTangent * coinSlopeAlong * 0.32);
+// For a height h over tangents U and V, the surface normal is N - h_u U - h_v V,
+// whichever way round U and V are. The slopes are in the coin's units, the
+// tangents are in view space, and the geometric normal is what the map tilts.
+normal = normalize(normal - coinU * coinSlopeU - coinV * coinSlopeV);
 `;
 
 /**
@@ -300,14 +302,23 @@ reflectedLight.indirectDiffuse *= coinOcclusion;
 reflectedLight.indirectSpecular *= coinOcclusion;
 `;
 
-export function createCoinMaterial(settings?: Partial<CoinSettings>): CoinMaterial {
+/**
+ * `halfThickness` is what the edge strip's y spans; the asset build bakes it to
+ * the coin's inradius.
+ */
+export function createCoinMaterial(settings?: Partial<CoinSettings>, halfThickness = 0.1): CoinMaterial {
   const coin: CoinSettings = { ...DEFAULT_COIN, ...settings };
   // Clean until the map arrives: a single texel as far from any wall as the map
   // can say.
   const clean = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
   clean.needsUpdate = true;
+  const flat = new THREE.DataTexture(new Uint8Array([128, 128, 0, 255]), 1, 1);
+  flat.needsUpdate = true;
   const uniforms = {
     uCoinWearMap: { value: clean as THREE.Texture },
+    uCoinSurfaceMap: { value: flat as THREE.Texture },
+    uCoinEdgeMap: { value: flat as THREE.Texture },
+    uCoinHalfThickness: { value: halfThickness },
     uCoinGrime: { value: coin.grime },
     uCoinPolish: { value: coin.polish },
     uCoinWearAmount: { value: coin.wear },
@@ -347,19 +358,25 @@ export function createCoinMaterial(settings?: Partial<CoinSettings>): CoinMateri
   };
   // A key of its own, so three does not hand this material a program cached for
   // an unpatched MeshPhysicalMaterial with the same settings.
-  material.customProgramCacheKey = () => 'coin-ancient';
+  material.customProgramCacheKey = () => 'coin-ancient-baked';
 
-  const ready = new THREE.TextureLoader()
-    .loadAsync(`${import.meta.env.BASE_URL}dice/coin-wear.png`)
-    .then((texture) => {
+  const loader = new THREE.TextureLoader();
+  const load = (file: string, wrapS: THREE.Wrapping, mipmaps: boolean) =>
+    loader.loadAsync(`${import.meta.env.BASE_URL}dice/${file}`).then((texture) => {
       texture.flipY = false;
       texture.colorSpace = THREE.NoColorSpace;
-      texture.wrapS = THREE.ClampToEdgeWrapping;
+      texture.wrapS = wrapS;
       texture.wrapT = THREE.ClampToEdgeWrapping;
-      texture.minFilter = THREE.LinearFilter;
-      texture.generateMipmaps = false;
-      uniforms.uCoinWearMap.value = texture;
+      texture.generateMipmaps = mipmaps;
+      texture.minFilter = mipmaps ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter;
+      texture.anisotropy = 8;
+      return texture;
     });
+  const ready = Promise.all([
+    load('coin-wear.png', THREE.ClampToEdgeWrapping, false).then((t) => void (uniforms.uCoinWearMap.value = t)),
+    load('coin-surface.webp', THREE.ClampToEdgeWrapping, true).then((t) => void (uniforms.uCoinSurfaceMap.value = t)),
+    load('coin-edge.webp', THREE.RepeatWrapping, true).then((t) => void (uniforms.uCoinEdgeMap.value = t)),
+  ]).then(() => undefined);
 
   return {
     material,

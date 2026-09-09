@@ -42,7 +42,7 @@
       scene.add(createTray().group);
 
       const assets = await loadDiceAssets();
-      const coin = createCoinMaterial(JSON.parse(params.get('coin') || '{}'));
+      const coin = createCoinMaterial(JSON.parse(params.get('coin') || '{}'), assets.info.coin.inradius);
       coin.material.envMap = createEnvironment(renderer, true);
       if (params.get('env')) coin.material.envMapIntensity = Number(params.get('env'));
       await coin.ready;

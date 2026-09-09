@@ -434,7 +434,8 @@ rather than the dice set's GLB, so the asset build reads binary STL, welds the
 soup of triangles into a mesh with smooth faces and hard edges (a 42° crease), and
 measures the relief off the model: the field level is the most common height in a
 histogram of the face, and everything above it is relief. That measurement is
-what the material works from.
+what the material works from, and the relief's outline, rasterised, is what its
+normal map is baked from.
 
 ### Its metal
 
@@ -458,23 +459,36 @@ to it since it was struck, and all of that follows the shape:
   says the metal is old.
 - Over that, toning: the reddish-brown film old gold takes on, in soft patches,
   thickest in the sheltered field.
-- The scratches are three families of hairlines in different directions across
-  the faces, each bent a little by a slow warp so that no two are parallel and
-  none is straight, and a separate family that runs around the circumference on
-  the edge. Each is a groove — the surface is cut at the point and a small step
-  along two directions across it, and the difference tilts the normal — that is
-  rougher along its floor. And dents: soft pits a few pixels across, most of them
-  on the exposed metal that has taken the knocks.
+- And the surface itself, from a normal map baked by the asset build
+  (`tools/coin-surface.mjs`). Every edge of the relief is rounded off, on the
+  raised side of every outline, by an elliptical profile off the distance to the
+  outline — the single thing that most says "old", since a freshly struck coin
+  has crisp edges and a coin that has spent a lifetime in pockets has none — and
+  the foot of every wall gets a small fillet. The rim's outer edge and the
+  coin's edge are rounded the same way, which is also what the physics does to
+  the rim. Over that: a couple of hundred shallow scratches of every length and
+  direction, shallow because a hairline is seen by its highlight rather than its
+  depth, dents, nicks in the rim, pinpoint pores; and, computed rather than
+  baked, the strike's slow swell and the metal's fine grain. The scratch and
+  dent masks ride in the map's spare channels and roughen and darken their
+  floors.
 
-None of it glitters. Every feature that is switched on by a threshold — a
-scratch, a dent — is switched on across the width of a pixel rather than at a
-point, using the screen-space derivative of the noise it comes from, and no
-feature is finer than a couple of pixels at the reveal's framing. A pattern finer
-than a pixel does not draw as a pattern; it draws as sparkle that crawls when the
-camera moves, and the first version of this coin did exactly that. The grooves
-are the one place a screen-space derivative is not used: their slope is a height
-difference over a fixed step in the coin's own space, so a scratch is the same
-groove at any distance rather than a sharper one the further away it is.
+The map stores slopes rather than normals: how much the surface rises per unit
+along each of the two directions it is sampled by. A slope is the same number
+whatever frame it is read in, so one map serves the faces, sampled by the coin's
+x and z with heads and tails side by side in an atlas, and a separate strip
+serves the edge, sampled by the angle around the coin and by y; the shader
+tilts the geometric normal by the two slopes along the matching tangents, and
+where a wall of the relief runs from face to edge it blends the two by how far
+the normal has turned. Slopes also average correctly under mip filtering, which
+is why none of it glitters: a scratch narrower than a pixel fades to a faint
+tilt rather than flickering, where the first version of this coin, with its
+detail computed per pixel from noise finer than a pixel, crawled with sparkle
+whenever the camera moved. The distance to each outline comes from an exact
+Euclidean distance transform over the rasterised relief, which also feeds the
+grime map. Baking the swell and grain too made the map two megabytes — noise in
+every texel — where the damage alone, flat everywhere else, is under four
+hundred kilobytes.
 
 The asset build stores how deep into a recess each vertex sits in the UV slot the
 coin has no use for, and bakes how far each point of the field is from the foot

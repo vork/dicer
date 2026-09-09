@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import sharp from 'sharp';
+import { bakeEdge, bakeFace, distanceTransform, rasteriseRaised } from './coin-surface.mjs';
 import { readGlb, readAccessor, readImage, matrixScale, writeGlb } from './glb.mjs';
 
 const SOURCE = process.argv[2] || '/root/.claude/uploads/80492aad-1b8b-5ad8-b105-0b761a0e5602/7bfb6e53-rpg_dice_set_1.glb';
@@ -425,82 +426,57 @@ async function main() {
     // baked as a small texture instead, one channel per face, that the shader
     // samples by the coin's own x and z. Raised tops are rasterised into a mask
     // and the field is the distance from it.
+    //
+    // The same masks drive the surface bake (see coin-surface.mjs): the slope
+    // maps that round the relief's edges, and cut the scratches and dents.
+    const SURFACE_SIZE = 512;
     const WEAR_SIZE = 256;
-    // The texture spans this many units either side of the axis, for every coin,
-    // so nothing has to be told the coin's radius to read it.
+    // The textures span this many units either side of the axis, for every
+    // coin, so nothing has to be told the coin's radius to read them.
     const WEAR_EXTENT = 0.7;
     if (rim > WEAR_EXTENT) throw new Error(`coin radius ${rim} exceeds the wear texture's ${WEAR_EXTENT}`);
     // Distances are stored as a fraction of this, so 255 is this far from any wall.
     const WEAR_RANGE = 0.25;
     const wear = Buffer.alloc(WEAR_SIZE * WEAR_SIZE * 3);
-    const toTexel = (v) => ((v + WEAR_EXTENT) / (2 * WEAR_EXTENT)) * WEAR_SIZE;
+    const faceMaps = [];
     for (const [channel, side] of [[0, 1], [1, -1]]) {
-      const raisedMask = new Uint8Array(WEAR_SIZE * WEAR_SIZE);
-      // Outside the coin counts as raised, so the rim's foot is found even where
-      // the rim's own top surface is tessellated too coarsely to cover it.
+      const raised = rasteriseRaised({ position, index, cavityOf, side, rim, size: SURFACE_SIZE, extent: WEAR_EXTENT });
+      const distance = distanceTransform(raised, SURFACE_SIZE, SURFACE_SIZE);
+      const texel = (2 * WEAR_EXTENT) / SURFACE_SIZE;
+      // Box-filtered down to the wear map's size.
+      const ratio = SURFACE_SIZE / WEAR_SIZE;
       for (let py = 0; py < WEAR_SIZE; py++) {
         for (let px = 0; px < WEAR_SIZE; px++) {
-          const x = ((px + 0.5) / WEAR_SIZE) * 2 * WEAR_EXTENT - WEAR_EXTENT;
-          const z = ((py + 0.5) / WEAR_SIZE) * 2 * WEAR_EXTENT - WEAR_EXTENT;
-          if (Math.hypot(x, z) > rim * 0.985) raisedMask[py * WEAR_SIZE + px] = 1;
-        }
-      }
-      for (let t = 0; t < index.length; t += 3) {
-        const a = index[t], b = index[t + 1], c = index[t + 2];
-        if (cavityOf[a] >= 0.5 || cavityOf[b] >= 0.5 || cavityOf[c] >= 0.5) continue;
-        if (Math.sign(position[a * 3 + 1]) !== side || Math.sign(position[b * 3 + 1]) !== side) continue;
-        if (Math.sign(position[c * 3 + 1]) !== side) continue;
-        const xs = [a, b, c].map((i) => toTexel(position[i * 3]));
-        const zs = [a, b, c].map((i) => toTexel(position[i * 3 + 2]));
-        const minX = Math.max(0, Math.floor(Math.min(...xs)));
-        const maxX = Math.min(WEAR_SIZE - 1, Math.ceil(Math.max(...xs)));
-        const minZ = Math.max(0, Math.floor(Math.min(...zs)));
-        const maxZ = Math.min(WEAR_SIZE - 1, Math.ceil(Math.max(...zs)));
-        const area = (xs[1] - xs[0]) * (zs[2] - zs[0]) - (xs[2] - xs[0]) * (zs[1] - zs[0]);
-        if (Math.abs(area) < 1e-9) continue;
-        for (let py = minZ; py <= maxZ; py++) {
-          for (let px = minX; px <= maxX; px++) {
-            const qx = px + 0.5, qz = py + 0.5;
-            const w0 = ((xs[1] - qx) * (zs[2] - qz) - (xs[2] - qx) * (zs[1] - qz)) / area;
-            const w1 = ((xs[2] - qx) * (zs[0] - qz) - (xs[0] - qx) * (zs[2] - qz)) / area;
-            const w2 = 1 - w0 - w1;
-            if (w0 >= -1e-6 && w1 >= -1e-6 && w2 >= -1e-6) raisedMask[py * WEAR_SIZE + px] = 1;
+          let sum = 0;
+          for (let dy = 0; dy < ratio; dy++) {
+            for (let dx = 0; dx < ratio; dx++) sum += Math.min(1, (distance[(py * ratio + dy) * SURFACE_SIZE + px * ratio + dx] * texel) / WEAR_RANGE);
           }
+          wear[(py * WEAR_SIZE + px) * 3 + channel] = Math.round((sum / (ratio * ratio)) * 255);
         }
       }
-      // Exact distance to the mask's boundary, by brute force over the boundary
-      // texels: a few thousand of them against sixty-five thousand texels.
-      const boundary = [];
-      for (let py = 0; py < WEAR_SIZE; py++) {
-        for (let px = 0; px < WEAR_SIZE; px++) {
-          if (!raisedMask[py * WEAR_SIZE + px]) continue;
-          const edge =
-            px === 0 || py === 0 || px === WEAR_SIZE - 1 || py === WEAR_SIZE - 1 ||
-            !raisedMask[py * WEAR_SIZE + px - 1] || !raisedMask[py * WEAR_SIZE + px + 1] ||
-            !raisedMask[(py - 1) * WEAR_SIZE + px] || !raisedMask[(py + 1) * WEAR_SIZE + px];
-          if (edge) boundary.push(px, py);
-        }
-      }
-      const texel = (2 * WEAR_EXTENT) / WEAR_SIZE;
-      for (let py = 0; py < WEAR_SIZE; py++) {
-        for (let px = 0; px < WEAR_SIZE; px++) {
-          let value = 0;
-          if (!raisedMask[py * WEAR_SIZE + px]) {
-            let best = Infinity;
-            for (let k = 0; k < boundary.length; k += 2) {
-              const dx = boundary[k] - px, dz = boundary[k + 1] - py;
-              const d = dx * dx + dz * dz;
-              if (d < best) best = d;
-            }
-            value = Math.min(1, (Math.sqrt(best) * texel) / WEAR_RANGE);
-          }
-          wear[(py * WEAR_SIZE + px) * 3 + channel] = Math.round(value * 255);
-        }
-      }
+      faceMaps.push(bakeFace({ raised, size: SURFACE_SIZE, extent: WEAR_EXTENT, rim, seed: 11 + channel * 97 }));
     }
     await sharp(wear, { raw: { width: WEAR_SIZE, height: WEAR_SIZE, channels: 3 } })
       .png({ compressionLevel: 9 })
       .toFile(path.join(OUT_DIR, 'coin-wear.png'));
+
+    // The two faces side by side in one atlas, heads on the left; the edge as a
+    // strip. Lossless: a slope map does not survive a lossy codec.
+    const atlas = Buffer.alloc(SURFACE_SIZE * 2 * SURFACE_SIZE * 4);
+    for (let y = 0; y < SURFACE_SIZE; y++) {
+      faceMaps[0].copy(atlas, y * SURFACE_SIZE * 2 * 4, y * SURFACE_SIZE * 4, (y + 1) * SURFACE_SIZE * 4);
+      faceMaps[1].copy(atlas, (y * SURFACE_SIZE * 2 + SURFACE_SIZE) * 4, y * SURFACE_SIZE * 4, (y + 1) * SURFACE_SIZE * 4);
+    }
+    await sharp(atlas, { raw: { width: SURFACE_SIZE * 2, height: SURFACE_SIZE, channels: 4 } })
+      .webp({ lossless: true })
+      .toFile(path.join(OUT_DIR, 'coin-surface.webp'));
+    const EDGE_WIDTH = 2048;
+    const EDGE_HEIGHT = 128;
+    await sharp(bakeEdge({ width: EDGE_WIDTH, height: EDGE_HEIGHT, rim, top, seed: 5 }), {
+      raw: { width: EDGE_WIDTH, height: EDGE_HEIGHT, channels: 4 },
+    })
+      .webp({ lossless: true })
+      .toFile(path.join(OUT_DIR, 'coin-edge.webp'));
 
     // Reads from the two flat faces only. The collider is a cylinder rather than
     // the hull, so the physics never sees the relief; the hull here is a ring for
