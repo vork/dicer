@@ -507,8 +507,10 @@ The scratches were first laid down as rings, 170 to the unit, which at the
 reveal's framing is finer than a pixel, and a pattern finer than a pixel does not
 draw as lines: it draws as glitter, and the relief came out as a crumbly sparkle.
 The rings also striped the coin's edge, where the radius they were keyed to is
-constant, so the edge showed vertical bands. Hence the hairline families above,
-and the edge's own circumferential family.
+constant, so the edge showed vertical bands. A second version drew hairlines
+from noise per pixel, anti-aliased by its derivative, which stopped the sparkle
+but still had to be kept coarse. The baked map above replaced both: mipmaps
+handle the fine end, and the edge has its own strip.
 
 The field outshone the relief. Measured off the render, the field sat at 180 out
 of 255 and the polished relief at 137 — the coin inside out, since the high
