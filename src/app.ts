@@ -5,6 +5,7 @@ import { loadDiceAssets, loadSetTextures, type DiceAssets, type DiceSet } from '
 import { createEnvironment, createLights } from './scene/environment';
 import { createTray, TRAY } from './scene/tray';
 import { createDiceMaterial, type DiceMaterial, type FlakeSettings } from './scene/dice-material';
+import { createCoinMaterial, type CoinMaterial, type CoinSettings } from './scene/coin-material';
 import { createPostFx, type PostFx } from './scene/postfx';
 import { installGT7ToneMapping } from './scene/tonemap';
 import { DiceWorld, SEEDED_FRAME } from './physics/dice-world';
@@ -44,6 +45,7 @@ export class App {
   private hud!: Hud;
   private input!: ThrowInput;
   private dice!: DiceMaterial;
+  private coin!: CoinMaterial;
   private diceMaterial!: THREE.MeshPhysicalMaterial;
 
   private activeSet!: DiceSet;
@@ -119,9 +121,13 @@ export class App {
 
     this.dice = createDiceMaterial();
     this.diceMaterial = this.dice.material;
+    this.coin = createCoinMaterial();
+    // Its own room: the plain one shows a flat face nothing but the dark shell.
+    this.coin.material.envMap = createEnvironment(this.renderer, true);
+    await this.coin.ready;
     await this.applySet(this.activeSet);
 
-    this.diceWorld = new DiceWorld(this.rapier, this.assets, this.diceMaterial);
+    this.diceWorld = new DiceWorld(this.rapier, this.assets, this.diceMaterial, this.coin.material);
     this.scene.add(this.diceWorld.group);
 
     this.postFx = createPostFx(this.renderer, this.scene, this.director.camera);
@@ -230,7 +236,7 @@ export class App {
 
     const { impacts, justSettled } = this.diceWorld.step(delta);
     for (const impact of impacts) {
-      this.audio.impact(impact.strength, impact.pan, impact.surface, impact.radius, impact.when);
+      this.audio.impact(impact.strength, impact.pan, impact.surface, impact.radius, impact.when, impact.metal);
     }
 
     if (justSettled) this.onSettled();
@@ -286,6 +292,8 @@ export class App {
       diceMaterial: this.diceMaterial,
       setFlakes: (settings: Partial<FlakeSettings>) => this.dice.setFlakes(settings),
       getFlakes: () => this.dice.getFlakes(),
+      setCoin: (settings: Partial<CoinSettings>) => this.coin.setCoin(settings),
+      getCoin: () => this.coin.getCoin(),
       setBloom: (strength: number, radius: number, threshold: number) =>
         this.postFx.setBloom(strength, radius, threshold),
       setGrain: (amount: number) => this.postFx.setGrain(amount),

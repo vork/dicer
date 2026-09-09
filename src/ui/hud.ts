@@ -1,5 +1,5 @@
 import type { DiceSet } from '../assets';
-import { DIE_TYPES, type DieType } from '../dice/values';
+import { DIE_TYPES, faceLabel, type DieType } from '../dice/values';
 import { RESULT_MODES, type Outcome, type ResultMode, type Roll } from '../dice/outcome';
 import type { DragState } from '../input/throw-input';
 
@@ -264,7 +264,7 @@ export class Hud {
   }
 
   showResult(rolls: Roll[], outcome: Outcome) {
-    this.revealTotal.textContent = String(outcome.value);
+    this.revealTotal.textContent = headline(rolls, outcome);
     this.revealTotal.classList.remove('crit', 'fumble');
     if (outcome.critical) this.revealTotal.classList.add('crit');
     else if (outcome.fumble) this.revealTotal.classList.add('fumble');
@@ -289,7 +289,7 @@ export class Hud {
 
         chip.append(document.createTextNode(`${roll.type} `));
         const value = document.createElement('b');
-        value.textContent = String(roll.value);
+        value.textContent = faceLabel(roll.type, roll.value);
         chip.appendChild(value);
         this.revealBreakdown.appendChild(chip);
       });
@@ -356,9 +356,25 @@ function describeRoll(rolls: Roll[], mode: ResultMode): string {
   if (rolls.length === 0) return '';
   const counts = new Map<DieType, number>();
   for (const roll of rolls) counts.set(roll.type, (counts.get(roll.type) ?? 0) + 1);
+  const name = (type: DieType, count: number) => (type === 'coin' ? `${count} coin${count > 1 ? 's' : ''}` : `${count}${type}`);
   const pool =
-    rolls.length === 1 ? rolls[0].type : [...counts.entries()].map(([type, count]) => `${count}${type}`).join(' + ');
+    rolls.length === 1 ? rolls[0].type : [...counts.entries()].map(([type, count]) => name(type, count)).join(' + ');
 
   if (mode === 'sum' || rolls.length === 1) return pool;
   return `${pool} · ${mode}`;
+}
+
+/**
+ * The big number — except that a flipped coin is not a number. A lone coin says
+ * heads or tails; a pool that is all coins under a sum says how many came up
+ * heads; a coin in a pool of dice counts as the d2 it is and the total is shown.
+ */
+function headline(rolls: Roll[], outcome: Outcome): string {
+  const coins = rolls.filter((roll) => roll.type === 'coin');
+  if (coins.length === 0 || coins.length !== rolls.length) return String(outcome.value);
+  if (rolls.length === 1 || outcome.mode !== 'sum') return faceLabel('coin', outcome.value);
+  const heads = coins.filter((roll) => roll.value === 2).length;
+  if (heads === 0) return 'All Tails';
+  if (heads === coins.length) return 'All Heads';
+  return heads === 1 ? '1 Head' : `${heads} Heads`;
 }

@@ -19,7 +19,7 @@ function table(die) {
 let failures = 0;
 const fail = (msg) => { console.error(`  FAIL ${msg}`); failures++; };
 
-for (const die of ['d4', 'd6', 'd8', 'd10', 'd12', 'd20']) {
+for (const die of ['d4', 'd6', 'd8', 'd10', 'd12', 'd20', 'coin']) {
   const values = table(die);
   const data = faces[die];
   const slots = die === 'd4' ? data.hull.length : data.faces.length;

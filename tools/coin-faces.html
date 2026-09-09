@@ -1,0 +1,49 @@
+<!doctype html>
+<html>
+  <head><meta charset="utf-8" /><title>coin faces</title>
+  <style>body{margin:0;background:#000}</style></head>
+  <body>
+    <script type="module">
+      import * as THREE from 'three';
+      import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+      const TILE = 512;
+      const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+      renderer.setSize(TILE * 2, TILE, false);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      document.body.appendChild(renderer.domElement);
+      const gltf = await new GLTFLoader().loadAsync('/dice/dice.glb');
+      let coin;
+      gltf.scene.traverse((o) => { if (o.isMesh && o.name === 'coin') coin = o; });
+      const scene = new THREE.Scene();
+      // Raking light, so the relief reads as relief.
+      const key = new THREE.DirectionalLight(0xffffff, 3.0); key.position.set(2, 1.2, 3); scene.add(key);
+      scene.add(new THREE.HemisphereLight(0xffffff, 0x222233, 0.8));
+      const params = new URLSearchParams(location.search);
+      // ?normals shows the normals as colour, which separates a lighting problem
+      // from a geometry one at a glance.
+      const material = params.has('normals')
+        ? new THREE.MeshNormalMaterial()
+        : new THREE.MeshStandardMaterial({ color: 0xd8a84a, metalness: 0.2, roughness: 0.55 });
+      const mesh = new THREE.Mesh(coin.geometry, material);
+      scene.add(mesh);
+      const camera = new THREE.OrthographicCamera(-0.75, 0.75, 0.75, -0.75, 0.1, 10);
+      // Tilted, not straight down. The relief is a pure extrusion — vertical
+      // walls between two flat levels — so from directly above the walls have no
+      // projected area and the field and the raised tops share a normal, and the
+      // whole face renders as one flat disc. Forty degrees off the axis puts the
+      // walls on screen and lets the raking light draw the edges.
+      const shoot = (dir) => {
+        const tilt = (40 * Math.PI) / 180;
+        camera.position.set(0, dir * 3 * Math.cos(tilt), 3 * Math.sin(tilt));
+        camera.up.set(0, dir, 0);
+        camera.lookAt(0, 0, 0);
+        renderer.setViewport(dir > 0 ? 0 : TILE, 0, TILE, TILE);
+        renderer.setScissor(dir > 0 ? 0 : TILE, 0, TILE, TILE);
+        renderer.setScissorTest(true);
+        renderer.render(scene, camera);
+      };
+      shoot(1); shoot(-1);
+      window.__done = true;
+    </script>
+  </body>
+</html>

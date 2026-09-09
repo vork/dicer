@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
-import type { DiceAssets } from '../assets';
+import type { DiceAssets, DieGeometryInfo } from '../assets';
 import { type DieType } from '../dice/values';
 import { readDie, readDirectionsFor } from '../dice/read';
 import { TRAY, PLAY } from '../scene/tray';
@@ -47,6 +47,28 @@ const KICKS_BEFORE_REDROP = 2;
  */
 const MAX_UNCOCK_NUDGES = 12;
 
+/**
+ * A coin on its edge is a wheel, and the solver knows nothing about felt.
+ *
+ * Rapier has no rolling resistance: a coin that lands rolling on its rim keeps
+ * rolling, hits the far wall, and comes back, indefinitely — one throw in twenty
+ * spent its whole 25-second budget doing exactly that. Felt stops a rolling coin
+ * in a second or two, so while a coin is upright on the floor its velocities bleed
+ * off at this rate on top of the body's own damping.
+ *
+ * And a coin that has not shown a face for `COIN_STUCK_SECONDS` is stuck: still
+ * on its rim, or leaning on a wall where the solver keeps it twitching too much
+ * to ever count as at rest (a lean at 45 degrees held for the whole 25-second
+ * budget, jumping about by a hundredth, once in three hundred throws). A throw
+ * settles in a second and a half on average and a flip passes through flat
+ * twice a turn, so a coin off its faces for that long is not still rolling; it
+ * is knocked over the way a cocked die is.
+ */
+const COIN_ROLLING_RESISTANCE = 3;
+const COIN_STUCK_SECONDS = 1.5;
+/** A coin's axis this far from vertical means it is on its rim, not a face. */
+const COIN_ON_EDGE = 0.5;
+
 export interface Die {
   type: DieType;
   body: RAPIER.RigidBody;
@@ -58,6 +80,10 @@ export interface Die {
   /** Local-space directions to test against world up: face normals, or hull corners for a d4. */
   readDirections: THREE.Vector3[];
   previousSpeed: number;
+  /** Seconds a coin has gone without lying on a face; unused for dice. */
+  cockedSeconds: number;
+  /** Height and reading at the start of the current still spell, for a coin. */
+  restPose: { y: number; dot: number };
   /**
    * Set whenever a die is put somewhere rather than travelling there. Motion blur
    * works from where a die was drawn last frame, and a die that was picked up and
@@ -77,6 +103,8 @@ export interface Impact {
   surface: ContactSurface;
   /** The die's bounding radius, so a big die can ring lower than a small one. */
   radius: number;
+  /** A coin, which rings rather than clicks. */
+  metal: boolean;
   /**
    * Seconds after the start of this frame that the contact actually happened.
    *
@@ -99,6 +127,26 @@ export interface StepResult {
  * Only ever used to make a throw repeatable for a check — the app runs on
  * Math.random.
  */
+/**
+ * A coin is a round cylinder: a squat disc with a rounded rim.
+ *
+ * Not a plain cylinder, because that stood on its edge 17 times in 240 rolls and
+ * stayed there: a flat band 0.2 wide under a centre of mass directly above it is
+ * a perfectly stable pose, and the check reported every one of those coins as
+ * never settling. A real coin's rim is rounded, which turns that pose into a
+ * balancing act it loses in under a second, and the rounder the rim the sooner
+ * it loses it — a border of 0.06 on a rim 0.1 thick still left 15 in 240
+ * standing, nine tenths of the thickness leaves a third of that. Rapier's round
+ * cylinder is the cylinder shrunk by the border and inflated back out by it, so
+ * the coin's resting height and its radius are unchanged.
+ */
+function coinCollider(rapier: typeof RAPIER, info: DieGeometryInfo): RAPIER.ColliderDesc {
+  const halfHeight = info.inradius;
+  const radius = info.faces[0].extent;
+  const border = halfHeight * 0.9;
+  return rapier.ColliderDesc.roundCylinder(halfHeight - border, radius - border, border);
+}
+
 /** The frame a seeded run pretends to have, whatever the machine is doing. */
 export const SEEDED_FRAME = 1 / 60;
 
@@ -148,17 +196,26 @@ export class DiceWorld {
   private readonly rapier: typeof RAPIER;
   private readonly assets: DiceAssets;
   private readonly material: THREE.Material;
+  /** Gold, weathered; the dice share one material and the coin has its own. */
+  private coinMaterial: THREE.Material;
   private accumulator = 0;
   private rolling = false;
   private settleReported = true;
   private readonly scratchQuaternion = new THREE.Quaternion();
+  private readonly scratchAxis = new THREE.Vector3();
   private readonly scratchVector = new THREE.Vector3();
   private readonly scratchBox = new THREE.Box3();
 
-  constructor(rapier: typeof RAPIER, assets: DiceAssets, material: THREE.Material) {
+  constructor(
+    rapier: typeof RAPIER,
+    assets: DiceAssets,
+    material: THREE.Material,
+    coinMaterial: THREE.Material = material,
+  ) {
     this.rapier = rapier;
     this.assets = assets;
     this.material = material;
+    this.coinMaterial = coinMaterial;
 
     this.world = new rapier.World({ x: 0, y: -GRAVITY, z: 0 });
     this.world.timestep = FIXED_DT;
@@ -347,8 +404,10 @@ export class DiceWorld {
       .setCcdEnabled(true)
       .setLinearDamping(0.02)
       // Felt bleeds off spin quickly, but not so fast the tumble stops being fun
-      // to watch: this is the main dial between "lively" and "dead".
-      .setAngularDamping(0.11)
+      // to watch: this is the main dial between "lively" and "dead". A coin gets
+      // more of it — a coin that lands on its edge and rolls is a wheel, and felt
+      // is what stops a wheel.
+      .setAngularDamping(type === 'coin' ? 0.45 : 0.11)
       .setCanSleep(true);
     const body = world.createRigidBody(bodyDesc);
 
@@ -358,18 +417,22 @@ export class DiceWorld {
       points[i * 3 + 1] = p[1];
       points[i * 3 + 2] = p[2];
     });
-    const colliderDesc = rapier.ColliderDesc.convexHull(points);
+    const colliderDesc = type === 'coin' ? coinCollider(rapier, info) : rapier.ColliderDesc.convexHull(points);
     if (!colliderDesc) throw new Error(`could not build a convex hull for ${type}`);
     world.createCollider(
-      colliderDesc
-        // Acrylic is ~1.2 g/cm^3; at 20mm per unit that lands near this figure.
-        .setDensity(1.5)
-        .setRestitution(0.4)
-        .setFriction(0.34),
+      type === 'coin'
+        ? // Heavy, as metal is: six times the acrylic. Solid gold would be sixteen
+          // times and would bulldoze the dice, so this is closer to brass.
+          colliderDesc.setDensity(9).setRestitution(0.3).setFriction(0.3)
+        : colliderDesc
+            // Acrylic is ~1.2 g/cm^3; at 20mm per unit that lands near this figure.
+            .setDensity(1.5)
+            .setRestitution(0.4)
+            .setFriction(0.34),
       body,
     );
 
-    const mesh = new THREE.Mesh(assets.geometries[type], this.material);
+    const mesh = new THREE.Mesh(assets.geometries[type], type === 'coin' ? this.coinMaterial : this.material);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.frustumCulled = false;
@@ -387,6 +450,8 @@ export class DiceWorld {
       settled: false,
       restSeconds: 0,
       nudges: 0,
+      cockedSeconds: 0,
+      restPose: { y: 0, dot: 0 },
       value: null,
       readDirections,
       previousSpeed: 0,
@@ -449,19 +514,36 @@ export class DiceWorld {
         { x: dx * speed * variance, y: lift * (0.75 + this.random() * 0.5), z: dz * speed * variance },
         true,
       );
-      die.body.setAngvel(
-        {
-          x: (this.random() - 0.5) * 2 * spin,
-          y: (this.random() - 0.5) * 2 * spin,
-          z: (this.random() - 0.5) * 2 * spin,
-        },
-        true,
-      );
+      if (die.type === 'coin') {
+        // A coin is flipped, not tumbled: spun hard about the horizontal axis
+        // across the throw so it goes end over end, with only a little wobble.
+        // Random spin on a disc mostly looks like a wobble, and a wobble is not
+        // a flip.
+        const flip = spin * (1.4 + this.random() * 0.6);
+        die.body.setAngvel(
+          {
+            x: -heading.y * flip + (this.random() - 0.5) * 6,
+            y: (this.random() - 0.5) * 8,
+            z: heading.x * flip + (this.random() - 0.5) * 6,
+          },
+          true,
+        );
+      } else {
+        die.body.setAngvel(
+          {
+            x: (this.random() - 0.5) * 2 * spin,
+            y: (this.random() - 0.5) * 2 * spin,
+            z: (this.random() - 0.5) * 2 * spin,
+          },
+          true,
+        );
+      }
       die.body.wakeUp();
 
       die.settled = false;
       die.restSeconds = 0;
       die.nudges = 0;
+      die.cockedSeconds = 0;
       die.value = null;
       // Seed from the real launch speed so the first frame's velocity change is
       // zero and does not register as a phantom collision.
@@ -494,6 +576,7 @@ export class DiceWorld {
     while (this.accumulator >= FIXED_DT && steps < MAX_SUBSTEPS) {
       this.world.step();
       this.accumulator -= FIXED_DT;
+      this.resistRolling();
       // One solver step is FIXED_DT of simulated time, which is TIME_SCALE times
       // that in real time, so this is when the contact will be heard.
       const when = steps * FIXED_DT * TIME_SCALE;
@@ -514,6 +597,7 @@ export class DiceWorld {
             surface: this.contactSurface(die, radius),
             radius,
             when,
+            metal: die.type === 'coin',
           });
         }
         die.previousSpeed = speed;
@@ -538,12 +622,26 @@ export class DiceWorld {
         continue;
       }
 
-      if (speed < REST_LINEAR && spin < REST_ANGULAR) {
+      const holding = this.coinHolding(die);
+      const still = speed < REST_LINEAR && (spin < REST_ANGULAR || holding);
+      if (still) {
         die.restSeconds += delta;
       } else {
         die.restSeconds = 0;
         die.settled = false;
         die.value = null;
+      }
+
+      // A coin that has shown no face for too long is tipped over. This is
+      // only what the felt would have done, so it counts as a nudge like any
+      // other and shares the limit. See COIN_STUCK_SECONDS.
+      if (die.type === 'coin' && !die.settled) {
+        die.cockedSeconds = this.read(die).dot < COCKED_DOT ? die.cockedSeconds + delta : 0;
+        if (die.cockedSeconds >= COIN_STUCK_SECONDS && die.nudges < MAX_UNCOCK_NUDGES) {
+          die.cockedSeconds = 0;
+          this.nudge(die);
+          continue;
+        }
       }
 
       if (!die.settled && die.restSeconds >= REST_SECONDS) {
@@ -567,6 +665,50 @@ export class DiceWorld {
     }
 
     return { impacts, justSettled };
+  }
+
+  /**
+   * Is a coin holding a pose even though the solver says it is spinning?
+   *
+   * A coin leaning against a wall touches the world at two points on its rim,
+   * and the contact solver never quite agrees with itself about them: the
+   * body reports an angular velocity of one to four radians a second, forever,
+   * while its height and its lean do not change by a thousandth. Judged on spin
+   * alone it never comes to rest, so it is never nudged, so it leans there until
+   * the throw times out. A coin that has not moved is at rest, whatever its
+   * velocity says.
+   */
+  private coinHolding(die: Die): boolean {
+    if (die.type !== 'coin') return false;
+    const y = die.body.translation().y;
+    const dot = this.read(die).dot;
+    if (die.restSeconds === 0) {
+      die.restPose.y = y;
+      die.restPose.dot = dot;
+      return true;
+    }
+    return Math.abs(y - die.restPose.y) < 0.01 && Math.abs(dot - die.restPose.dot) < 0.02;
+  }
+
+  /** Is this coin standing on its rim on the floor? */
+  private coinOnEdge(die: Die): boolean {
+    const r = die.body.rotation();
+    this.scratchQuaternion.set(r.x, r.y, r.z, r.w);
+    const axisUp = Math.abs(this.scratchAxis.set(0, 1, 0).applyQuaternion(this.scratchQuaternion).y);
+    const height = die.body.translation().y - TRAY.floorY;
+    return axisUp < COIN_ON_EDGE && height < this.assets.info.coin.radius + 0.08;
+  }
+
+  /** The felt's share of stopping a rolling coin. See COIN_ROLLING_RESISTANCE. */
+  private resistRolling() {
+    for (const die of this.dice) {
+      if (die.type !== 'coin' || !this.coinOnEdge(die)) continue;
+      const k = Math.exp(-COIN_ROLLING_RESISTANCE * FIXED_DT);
+      const l = die.body.linvel();
+      const w = die.body.angvel();
+      die.body.setLinvel({ x: l.x * k, y: l.y, z: l.z * k }, true);
+      die.body.setAngvel({ x: w.x * k, y: w.y * k, z: w.z * k }, true);
+    }
   }
 
   /** Finds the slot pointing most directly up and returns its printed value. */

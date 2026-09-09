@@ -12,7 +12,7 @@ import * as THREE from 'three';
  * with a big soft key panel and two coloured rim strips gives every edge a
  * highlight that travels as the die tumbles, which is what sells the material.
  */
-function buildEnvironmentScene(): THREE.Scene {
+function buildEnvironmentScene(reflector = false): THREE.Scene {
   const scene = new THREE.Scene();
 
   const box = new THREE.BoxGeometry();
@@ -57,13 +57,27 @@ function buildEnvironmentScene(): THREE.Scene {
   // A dim slab straight behind, so edges facing away still catch something.
   add(panel(0x39415c, 0.7), [0, 4.5, -13], [16, 7, 0.2]);
 
+  // The coin's reflector. The camera looks down into the tray from the front, so
+  // a flat face on the floor shows it whatever is high up behind the tray — and
+  // in this room that is the near-black shell. Resin does not mind: what you see
+  // of a die is mostly its own colour. Metal has nothing to show but the room,
+  // and the coin's field and relief came out as one flat beige. A product shot
+  // of a coin hangs a warm graduated card behind it for exactly this reason:
+  // one big soft source where the flat faces look, brighter toward the top, so
+  // the field carries a sweep of light and every edge of the relief turns
+  // through it. The dice keep the plain room.
+  if (reflector) {
+    add(panel(0xfff1dc, 2.6), [0, 11, -7.5], [18, 0.2, 9], [-0.55, 0, 0]);
+    add(panel(0xffe2b8, 0.9), [0, 5.5, -12], [18, 5, 0.2], [-0.15, 0, 0]);
+  }
+
   return scene;
 }
 
-export function createEnvironment(renderer: THREE.WebGLRenderer): THREE.Texture {
+export function createEnvironment(renderer: THREE.WebGLRenderer, reflector = false): THREE.Texture {
   const pmrem = new THREE.PMREMGenerator(renderer);
   pmrem.compileEquirectangularShader();
-  const scene = buildEnvironmentScene();
+  const scene = buildEnvironmentScene(reflector);
   const target = pmrem.fromScene(scene, 0.035);
   scene.traverse((object) => {
     const mesh = object as THREE.Mesh;

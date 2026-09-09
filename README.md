@@ -9,7 +9,7 @@ npm run assets     # rebuild public/dice/* from the source GLB (only needed once
 npm run dev
 ```
 
-Tap a die type to add one to the pool — tap again for a second, a third, and so
+Tap a die type — or the coin — to add one to the pool — tap again for a second, a third, and so
 on, up to twelve; the button carries a running count and each pool chip is a −/+
 stepper. Then click or tap anywhere to throw. Swipe instead and the direction and
 speed of the flick become the direction and force of the throw.
@@ -424,6 +424,109 @@ not spawn inside one another. Which die takes which slot is shuffled every throw
 without that the first die in the pool would always leave from the same place
 relative to the heading, so the pool's slots could not be independent by
 construction, only by measurement.
+
+## The coin
+
+The pool can also hold coins. A coin is a die with two faces, a dragon's head for
+heads and a tail for tails, and the reveal says which rather than showing a
+number; a pool of nothing but coins is counted as heads. It comes from an STL
+rather than the dice set's GLB, so the asset build reads binary STL, welds the
+soup of triangles into a mesh with smooth faces and hard edges (a 42° crease), and
+measures the relief off the model: the field level is the most common height in a
+histogram of the face, and everything above it is relief. That measurement is
+what the material works from.
+
+### Its metal
+
+The coin is gold that has been handled for a long time, and none of it is a
+texture. Fresh gold is a mirror with a colour, and a mirror with a colour is not
+much to look at; what makes a coin read as a coin is everything that has happened
+to it since it was struck, and all of that follows the shape:
+
+- The high points — the rim and the raised relief — are what fingers, pockets and
+  other coins have rubbed, so they are the clean metal, a shade brighter than the
+  rest and the most polished.
+- The field between them is where the dirt stays. It was struck matte and has been
+  toned by a lifetime of small wear, so it sits rougher than the relief, a little
+  darker, and under patches of grime that thicken toward the foot of every wall,
+  where a thumb cannot reach. Grime is a dielectric sitting on the gold, so it
+  takes low metalness and high roughness rather than merely a darker colour: it
+  stops reflecting the room and starts scattering the key.
+- The exposed metal carries hairline scratches that run around the coin rather
+  than across it, the marks of being turned in a hand, as a soft brushed sheen in
+  the roughness and a faint tilt in the normal.
+- Over that, broad soft tarnish, and the odd pit.
+
+The asset build stores how deep into a recess each vertex sits in the UV slot the
+coin has no use for, and bakes how far each point of the field is from the foot
+of a wall into a 256-pixel map, one channel per face, that the shader samples by
+the coin's own x and z. That one was tried per vertex first and came out as 1
+everywhere: the field is flat, so its only vertices are the ones on the wall feet
+themselves, and a distance that is zero at every vertex interpolates to zero in
+between. Everything else is noise in the coin's own object space, so it is locked
+to the metal and turns with it.
+
+Three more things went wrong on the way, each found with `npm run coin:look`,
+which draws the coin alone under the app's real lighting in a few seconds and can
+write any channel of the shader out as the picture.
+
+The scratches were first laid down at 170 rings to the unit, which at the
+reveal's framing is finer than a pixel, and a pattern finer than a pixel does not
+draw as lines: it draws as glitter, and the relief came out as a crumbly sparkle.
+They are now thirty to the unit, a few pixels apart.
+
+The field outshone the relief. Measured off the render, the field sat at 180 out
+of 255 and the polished relief at 137 — the coin inside out, since the high
+points of a worn coin are what shine. The room is why. Metal has nothing to show
+but its reflection, the camera looks down into the tray from the front, and so a
+flat face on the floor reflects whatever is high up behind the tray, which in
+this room is the near-black shell. The rougher field gathered a little of the key
+softbox from the side; the polished relief mirrored the dark exactly. Resin never
+minded, because most of what you see of a die is its own colour. So the coin has
+its own copy of the room with a reflector in it — a warm card high up behind the
+tray, brighter toward the top, which is exactly what a product photograph of a
+coin hangs behind it — and the field is toned well below the relief on top of
+that. The same effect is why pits cannot simply be rough: here a rough patch of
+gold is a bright one, so a pit is dark metal instead.
+
+And the reflector then blew the relief out to cream. Gold is only gold below the
+tone curve's shoulder: its reflectance is 1.0, 0.71, 0.29, and past the shoulder
+all three channels converge on white. The coin's environment intensity is a
+quarter of what the dice use, measured to the point where the relief stopped
+desaturating.
+
+### Its physics
+
+A coin is a round cylinder to the solver, not a convex hull of its mesh: the mesh
+is a disc with a relief on it, and a hull of that would have been a disc with a
+lumpy face. A plain cylinder stood on its edge 17 times in 240 rolls and stayed
+there — a flat band 0.2 wide under a centre of mass directly above it is a
+perfectly stable pose, and every one of those rolls was reported as never
+settling. Rounding the rim turns that pose into a balancing act the coin loses;
+the rounder the better, and at nine tenths of the coin's half thickness, five in
+240 still did not settle. Those five were two things the solver cannot do on its
+own.
+
+Rapier has no rolling resistance, so a coin that lands rolling on its rim keeps
+rolling, hits the far wall, comes back, and spends its whole 25-second budget
+doing so. Felt stops a rolling coin in a second or two, so while a coin is upright
+on the floor its velocities bleed off at 3/s on top of the body's own damping.
+And a coin leaning against a wall touches the world at two points on its rim,
+about which the contact solver never quite agrees with itself: it reports an
+angular velocity of one to four radians a second, forever, while the coin's height
+and lean do not change by a thousandth. Judged on spin it never came to rest, so
+it was never nudged, so it leaned there until the throw timed out. A coin that
+has not moved is at rest whatever its velocity says, so a coin is judged still on
+its pose, and as a backstop a coin that has shown no face for a second and a half
+— a throw settles in one on average and a flip passes through flat twice a turn —
+is knocked over the way a cocked die is. Over 1200 rolls none is now reported
+unsettled; the physics check rolls 600 and both faces come up evenly.
+
+The coin is six times as dense as the acrylic dice, closer to brass than to gold,
+which at sixteen times would bulldoze the pool. It is thrown with a flip about the
+axis across its heading, sounds like metal — a brighter, longer, higher voice on
+the same impact machinery, with the modes of a struck disc rather than a block —
+and the reveal reads it as Heads or Tails.
 
 ## Antialiasing
 
@@ -1057,6 +1160,8 @@ pose, not the antialiasing.
 | `npm run verify:build` | rebuilds, then runs the built site from a sub-path with no 404s |
 | `npm run verify:pwa` | rebuilds, then boots the installed app with the network cut |
 | `npm run calibrate` | regenerate the face contact sheets |
+| `npm run coin:faces` | contact sheet of the coin's two faces, and its normals with `--normals` |
+| `npm run coin:look` | the coin under the app's lighting in seconds, any shader channel with `--debug` |
 | `npm run flakes` | contact sheet of flake settings on one settled die |
 | `npm run tonemap` | the same settled pool through each tone mapping operator, exposure-matched |
 | `python3 tools/tonemap-curves.py` | what each operator does to a tinted highlight, exactly |

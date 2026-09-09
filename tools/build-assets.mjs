@@ -17,6 +17,8 @@ import sharp from 'sharp';
 import { readGlb, readAccessor, readImage, matrixScale, writeGlb } from './glb.mjs';
 
 const SOURCE = process.argv[2] || '/root/.claude/uploads/80492aad-1b8b-5ad8-b105-0b761a0e5602/7bfb6e53-rpg_dice_set_1.glb';
+const COIN_SOURCE =
+  process.argv[3] || '/root/.claude/uploads/80492aad-1b8b-5ad8-b105-0b761a0e5602/155cae1a-coin20dragon20head20tail.stl';
 const OUT_DIR = path.resolve('public/dice');
 const SETS_DIR = path.join(OUT_DIR, 'sets');
 
@@ -36,6 +38,101 @@ const DIE_ORDER = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20'];
 const TARGET_D20_WIDTH = 1.0;
 
 const HUMAN_SET_NAMES = {};
+
+/**
+ * Reads a binary STL as a flat, unindexed triangle list. STL normals are advisory
+ * and often garbage, so winding is checked against them once and the whole mesh
+ * is flipped if the file was authored inside-out.
+ */
+function readStl(file) {
+  const data = fs.readFileSync(file);
+  const count = data.readUInt32LE(80);
+  const position = new Float32Array(count * 9);
+  let agree = 0;
+  for (let t = 0; t < count; t++) {
+    const off = 84 + t * 50;
+    const nx = data.readFloatLE(off), ny = data.readFloatLE(off + 4), nz = data.readFloatLE(off + 8);
+    for (let k = 0; k < 9; k++) position[t * 9 + k] = data.readFloatLE(off + 12 + k * 4);
+    const p = position.subarray(t * 9, t * 9 + 9);
+    const ux = p[3] - p[0], uy = p[4] - p[1], uz = p[5] - p[2];
+    const vx = p[6] - p[0], vy = p[7] - p[1], vz = p[8] - p[2];
+    const cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
+    if (cx * nx + cy * ny + cz * nz > 0) agree++;
+  }
+  if (agree < count / 2) {
+    for (let t = 0; t < count; t++) {
+      const a = t * 9 + 3;
+      for (let k = 0; k < 3; k++) {
+        const tmp = position[a + k];
+        position[a + k] = position[a + 3 + k];
+        position[a + 3 + k] = tmp;
+      }
+    }
+  }
+  return position;
+}
+
+/**
+ * Welds coincident corners into shared vertices and smooths normals across
+ * shallow angles, splitting at anything sharper than `creaseDegrees`.
+ *
+ * A coin needs both: a rim that is one smooth curve, since polished metal shows
+ * every facet, and relief edges that stay crisp rather than melting into the
+ * field. Per-corner smoothing over the neighbours within the crease angle gives
+ * the first; the split at the crease gives the second.
+ */
+function weld(position, creaseDegrees) {
+  const triangles = position.length / 9;
+  const faceNormal = new Float32Array(triangles * 3);
+  for (let t = 0; t < triangles; t++) {
+    const p = position.subarray(t * 9, t * 9 + 9);
+    const ux = p[3] - p[0], uy = p[4] - p[1], uz = p[5] - p[2];
+    const vx = p[6] - p[0], vy = p[7] - p[1], vz = p[8] - p[2];
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const l = Math.hypot(nx, ny, nz) || 1;
+    faceNormal[t * 3] = nx / l;
+    faceNormal[t * 3 + 1] = ny / l;
+    faceNormal[t * 3 + 2] = nz / l;
+  }
+  const key = (i) => `${position[i].toFixed(4)},${position[i + 1].toFixed(4)},${position[i + 2].toFixed(4)}`;
+  const around = new Map();
+  for (let t = 0; t < triangles; t++) {
+    for (let c = 0; c < 3; c++) {
+      const k = key(t * 9 + c * 3);
+      if (!around.has(k)) around.set(k, []);
+      around.get(k).push(t);
+    }
+  }
+  const cosCrease = Math.cos((creaseDegrees * Math.PI) / 180);
+  const outPosition = [];
+  const outNormal = [];
+  const index = new Uint32Array(triangles * 3);
+  const cache = new Map();
+  for (let t = 0; t < triangles; t++) {
+    const fx = faceNormal[t * 3], fy = faceNormal[t * 3 + 1], fz = faceNormal[t * 3 + 2];
+    for (let c = 0; c < 3; c++) {
+      const i = t * 9 + c * 3;
+      const k = key(i);
+      let nx = 0, ny = 0, nz = 0;
+      for (const u of around.get(k)) {
+        const gx = faceNormal[u * 3], gy = faceNormal[u * 3 + 1], gz = faceNormal[u * 3 + 2];
+        if (fx * gx + fy * gy + fz * gz >= cosCrease) { nx += gx; ny += gy; nz += gz; }
+      }
+      const l = Math.hypot(nx, ny, nz) || 1;
+      nx /= l; ny /= l; nz /= l;
+      const vk = `${k}|${nx.toFixed(3)},${ny.toFixed(3)},${nz.toFixed(3)}`;
+      let v = cache.get(vk);
+      if (v === undefined) {
+        v = outPosition.length / 3;
+        cache.set(vk, v);
+        outPosition.push(position[i], position[i + 1], position[i + 2]);
+        outNormal.push(nx, ny, nz);
+      }
+      index[t * 3 + c] = v;
+    }
+  }
+  return { position: Float32Array.from(outPosition), normal: Float32Array.from(outNormal), index };
+}
 
 function centroidOfConvexMesh(position, index) {
   // Exact volume centroid via signed tetrahedra from the origin.
@@ -255,6 +352,179 @@ async function main() {
     };
     console.log(
       `${die}: ${faces.length} faces, ${hull.length} hull points, radius ${radius.toFixed(3)}, inradius ${inradius.toFixed(3)}`,
+    );
+  }
+
+  // --- the coin ---------------------------------------------------------------
+  //
+  // A separate source: a 25mm coin with a dragon in relief on each face, as an STL
+  // in millimetres. One world unit is 20mm, so it comes in at 1.25 across.
+  {
+    const raw = readStl(COIN_SOURCE);
+    // Its axis is Z in the file; the dice are read against world up, so the coin
+    // wants Y. (x, y, z) -> (x, z, -y) is a rotation, not a reflection, so the
+    // winding survives.
+    for (let i = 0; i < raw.length; i += 3) {
+      const y = raw[i + 1];
+      raw[i + 1] = raw[i + 2];
+      raw[i + 2] = -y;
+    }
+    for (let i = 0; i < raw.length; i++) raw[i] *= 0.05;
+
+    const { position, normal, index } = weld(raw, 42);
+    const centre = centroidOfConvexMesh(position, index);
+    for (let i = 0; i < position.length; i += 3) {
+      position[i] -= centre[0];
+      position[i + 1] -= centre[1];
+      position[i + 2] -= centre[2];
+    }
+
+    let rim = 0;
+    let top = 0;
+    for (let i = 0; i < position.length; i += 3) {
+      rim = Math.max(rim, Math.hypot(position[i], position[i + 2]));
+      top = Math.max(top, Math.abs(position[i + 1]));
+    }
+    // The relief stands proud of a recessed field. Find the field by looking for
+    // the most populated height below the top; the gap between them is how deep
+    // the recesses are, and that is what the weathering keys off.
+    const levels = new Map();
+    for (let i = 1; i < position.length; i += 3) {
+      const h = Math.abs(position[i]);
+      if (h > top - 0.004) continue;
+      const bin = Math.round(h / 0.002) * 0.002;
+      levels.set(bin, (levels.get(bin) || 0) + 1);
+    }
+    const field = [...levels.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    const depth = Math.max(top - field, 0.01);
+
+    // One channel the shader reads as weathering rather than as texture space.
+    // The coin carries no texture, so the UV slot is free.
+    //
+    // u: how deep into a recess a point is — 0 on the rim and the raised relief,
+    //    1 on the field. Every wall has a vertex at its top and one at its foot,
+    //    so this interpolates correctly down the wall.
+    const vertexCount = position.length / 3;
+    const uv = new Float32Array(vertexCount * 2);
+    const cavityOf = new Float32Array(vertexCount);
+    for (let i = 0; i < vertexCount; i++) {
+      const x = position[i * 3], y = position[i * 3 + 1], z = position[i * 3 + 2];
+      const r = Math.hypot(x, z);
+      const onRim = r > rim * 0.985;
+      const cavity = onRim ? 0 : Math.min(1, Math.max(0, (top - Math.abs(y)) / depth));
+      uv[i * 2] = cavity;
+      cavityOf[i] = cavity;
+    }
+
+    // How far each point of the field is from the foot of a wall — the base of
+    // the relief or of the rim — is where dirt gathers and where the light does
+    // not reach, and it is the difference between a coin that looks worn and a
+    // coin whose field has been painted brown. It cannot ride on the vertices:
+    // the field is flat, so its only vertices are the ones on the wall feet
+    // themselves, and a per-vertex distance came out as 1 everywhere. So it is
+    // baked as a small texture instead, one channel per face, that the shader
+    // samples by the coin's own x and z. Raised tops are rasterised into a mask
+    // and the field is the distance from it.
+    const WEAR_SIZE = 256;
+    // The texture spans this many units either side of the axis, for every coin,
+    // so nothing has to be told the coin's radius to read it.
+    const WEAR_EXTENT = 0.7;
+    if (rim > WEAR_EXTENT) throw new Error(`coin radius ${rim} exceeds the wear texture's ${WEAR_EXTENT}`);
+    // Distances are stored as a fraction of this, so 255 is this far from any wall.
+    const WEAR_RANGE = 0.25;
+    const wear = Buffer.alloc(WEAR_SIZE * WEAR_SIZE * 3);
+    const toTexel = (v) => ((v + WEAR_EXTENT) / (2 * WEAR_EXTENT)) * WEAR_SIZE;
+    for (const [channel, side] of [[0, 1], [1, -1]]) {
+      const raisedMask = new Uint8Array(WEAR_SIZE * WEAR_SIZE);
+      // Outside the coin counts as raised, so the rim's foot is found even where
+      // the rim's own top surface is tessellated too coarsely to cover it.
+      for (let py = 0; py < WEAR_SIZE; py++) {
+        for (let px = 0; px < WEAR_SIZE; px++) {
+          const x = ((px + 0.5) / WEAR_SIZE) * 2 * WEAR_EXTENT - WEAR_EXTENT;
+          const z = ((py + 0.5) / WEAR_SIZE) * 2 * WEAR_EXTENT - WEAR_EXTENT;
+          if (Math.hypot(x, z) > rim * 0.985) raisedMask[py * WEAR_SIZE + px] = 1;
+        }
+      }
+      for (let t = 0; t < index.length; t += 3) {
+        const a = index[t], b = index[t + 1], c = index[t + 2];
+        if (cavityOf[a] >= 0.5 || cavityOf[b] >= 0.5 || cavityOf[c] >= 0.5) continue;
+        if (Math.sign(position[a * 3 + 1]) !== side || Math.sign(position[b * 3 + 1]) !== side) continue;
+        if (Math.sign(position[c * 3 + 1]) !== side) continue;
+        const xs = [a, b, c].map((i) => toTexel(position[i * 3]));
+        const zs = [a, b, c].map((i) => toTexel(position[i * 3 + 2]));
+        const minX = Math.max(0, Math.floor(Math.min(...xs)));
+        const maxX = Math.min(WEAR_SIZE - 1, Math.ceil(Math.max(...xs)));
+        const minZ = Math.max(0, Math.floor(Math.min(...zs)));
+        const maxZ = Math.min(WEAR_SIZE - 1, Math.ceil(Math.max(...zs)));
+        const area = (xs[1] - xs[0]) * (zs[2] - zs[0]) - (xs[2] - xs[0]) * (zs[1] - zs[0]);
+        if (Math.abs(area) < 1e-9) continue;
+        for (let py = minZ; py <= maxZ; py++) {
+          for (let px = minX; px <= maxX; px++) {
+            const qx = px + 0.5, qz = py + 0.5;
+            const w0 = ((xs[1] - qx) * (zs[2] - qz) - (xs[2] - qx) * (zs[1] - qz)) / area;
+            const w1 = ((xs[2] - qx) * (zs[0] - qz) - (xs[0] - qx) * (zs[2] - qz)) / area;
+            const w2 = 1 - w0 - w1;
+            if (w0 >= -1e-6 && w1 >= -1e-6 && w2 >= -1e-6) raisedMask[py * WEAR_SIZE + px] = 1;
+          }
+        }
+      }
+      // Exact distance to the mask's boundary, by brute force over the boundary
+      // texels: a few thousand of them against sixty-five thousand texels.
+      const boundary = [];
+      for (let py = 0; py < WEAR_SIZE; py++) {
+        for (let px = 0; px < WEAR_SIZE; px++) {
+          if (!raisedMask[py * WEAR_SIZE + px]) continue;
+          const edge =
+            px === 0 || py === 0 || px === WEAR_SIZE - 1 || py === WEAR_SIZE - 1 ||
+            !raisedMask[py * WEAR_SIZE + px - 1] || !raisedMask[py * WEAR_SIZE + px + 1] ||
+            !raisedMask[(py - 1) * WEAR_SIZE + px] || !raisedMask[(py + 1) * WEAR_SIZE + px];
+          if (edge) boundary.push(px, py);
+        }
+      }
+      const texel = (2 * WEAR_EXTENT) / WEAR_SIZE;
+      for (let py = 0; py < WEAR_SIZE; py++) {
+        for (let px = 0; px < WEAR_SIZE; px++) {
+          let value = 0;
+          if (!raisedMask[py * WEAR_SIZE + px]) {
+            let best = Infinity;
+            for (let k = 0; k < boundary.length; k += 2) {
+              const dx = boundary[k] - px, dz = boundary[k + 1] - py;
+              const d = dx * dx + dz * dz;
+              if (d < best) best = d;
+            }
+            value = Math.min(1, (Math.sqrt(best) * texel) / WEAR_RANGE);
+          }
+          wear[(py * WEAR_SIZE + px) * 3 + channel] = Math.round(value * 255);
+        }
+      }
+    }
+    await sharp(wear, { raw: { width: WEAR_SIZE, height: WEAR_SIZE, channels: 3 } })
+      .png({ compressionLevel: 9 })
+      .toFile(path.join(OUT_DIR, 'coin-wear.png'));
+
+    // Reads from the two flat faces only. The collider is a cylinder rather than
+    // the hull, so the physics never sees the relief; the hull here is a ring for
+    // anything that reads it for extent.
+    const ring = [];
+    for (let k = 0; k < 32; k++) {
+      const a = (k / 32) * Math.PI * 2;
+      ring.push([Math.cos(a) * rim, top, Math.sin(a) * rim], [Math.cos(a) * rim, -top, Math.sin(a) * rim]);
+    }
+    const round = (v) => +v.toFixed(6);
+    geometries.push({ name: 'coin', position, normal, uv, index });
+    faceData.coin = {
+      radius: round(Math.hypot(rim, top)),
+      inradius: round(top),
+      hull: ring.map((v) => v.map(round)),
+      faces: [
+        { normal: [0, 1, 0], centroid: [0, round(top), 0], extent: round(rim) },
+        { normal: [0, -1, 0], centroid: [0, round(-top), 0], extent: round(rim) },
+      ],
+    };
+    uvData.coin = { faces: [] };
+    console.log(
+      `coin: ${index.length / 3} triangles, ${position.length / 3} vertices after welding, ` +
+        `radius ${rim.toFixed(3)}, half thickness ${top.toFixed(3)}, relief ${depth.toFixed(3)} deep`,
     );
   }
 

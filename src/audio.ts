@@ -8,6 +8,24 @@ import type { ContactSurface } from './physics/dice-world';
 const MODES = [1, 1.42, 1.93, 2.51, 3.14, 3.87, 4.6];
 
 /**
+ * A struck disc rings on a different set of partials from a struck lump, and a
+ * gold coin is a disc. These sit further apart than the dice's, with the second
+ * well clear of the first, which is what makes it a clink rather than a click.
+ */
+const COIN_MODES = [1, 1.59, 2.14, 2.3, 2.65, 2.92];
+
+/**
+ * The coin's voice, by what it landed on. Felt smothers a coin almost completely
+ * — the ring is in the metal, and felt stops the metal — while a coin on the
+ * leather wall or on another die rings out.
+ */
+const COIN: Record<ContactSurface, { root: number; decay: number; tick: number; ring: number; body: number }> = {
+  floor: { root: 3400, decay: 0.035, tick: 0.22, ring: 0.9, body: 0.3 },
+  wall: { root: 3400, decay: 0.07, tick: 0.28, ring: 1.15, body: 0.2 },
+  dice: { root: 3400, decay: 0.09, tick: 0.34, ring: 1.3, body: 0.12 },
+};
+
+/**
  * Procedural dice audio. No samples to ship: each impact is one burst of noise
  * struck through a set of resonators — the sharp top end of the contact itself,
  * then three high-Q modes ringing where the body of the die would — layered with
@@ -278,7 +296,7 @@ export class DiceAudio {
    * @param surface what it hit
    * @param radius the die's bounding radius, in world units
    */
-  impact(strength: number, pan = 0, surface: ContactSurface = 'floor', radius = 0.5, when = 0) {
+  impact(strength: number, pan = 0, surface: ContactSurface = 'floor', radius = 0.5, when = 0, metal = false) {
     if (!this.enabled) return;
     if (!this.context) this.init();
     const context = this.context;
@@ -310,7 +328,7 @@ export class DiceAudio {
     // crack, so a linear mapping left the median impact near inaudible. The
     // curve lifts the quiet end without flattening the loud end.
     const level = Math.pow(Math.max(0.06, Math.min(1, strength)), 0.55);
-    const voice = SURFACES[surface];
+    const voice = metal ? COIN[surface] : SURFACES[surface];
 
     // Bring the room tone up, and leave it decaying. Every contact re-raises it,
     // so it is continuous through a roll and gone a few seconds after the last
@@ -385,7 +403,7 @@ export class DiceAudio {
     // the modes a contact happens to excite depend on where it was struck, so
     // they should differ every time and never resolve into a pitch.
     const root = (voice.root * 0.5) / Math.max(radius, 0.2) * jitter(0.04);
-    for (const nominal of MODES) {
+    for (const nominal of metal ? COIN_MODES : MODES) {
       // A fixed set of ratios, barely jittered, and a root that hardly moves.
       //
       // This was drawing fresh random ratios for every impact, on the theory that
@@ -404,7 +422,9 @@ export class DiceAudio {
       // That is a tuning fork. Acrylic has a loss factor around 0.05, which puts
       // its modes near Q 20 before the tray damps them further, and nothing in a
       // felt-lined leather box rings narrower than that.
-      const q = Math.min(Math.max((Math.PI * hz * t20) / 2.303, 3), 26);
+      // Acrylic in a felt tray sits near Q 20; a coin is a struck disc of metal
+      // and genuinely rings, so it is allowed a much narrower resonance.
+      const q = Math.min(Math.max((Math.PI * hz * t20) / 2.303, 3), metal ? 70 : 26);
       const mode = context.createBiquadFilter();
       mode.type = 'bandpass';
       mode.frequency.value = hz;

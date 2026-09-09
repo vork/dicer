@@ -32,6 +32,8 @@
     "calibrate": "node tools/calibrate.mjs --set set7 --mode face --zoom 0.62",
     "flakes": "node tools/flake-sheet.mjs",
     "tonemap": "node tools/tonemap-sheet.mjs",
+    "coin:faces": "node tools/coin-faces.mjs",
+    "coin:look": "node tools/coin-look.mjs",
     "face-sheets": "node tools/face-sheets.mjs",
     "shoot": "node tools/shoot.mjs",
     "diagnose": "node tools/diagnose.mjs"

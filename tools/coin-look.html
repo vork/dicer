@@ -1,0 +1,78 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>coin look</title>
+    <style>
+      body { margin: 0; background: #000; }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      // The coin alone, under the app's real material, lights, room, reflector
+      // and tone mapping, drawn once. `?debug=<glsl>` writes any expression
+      // from the coin's fragment shader out as the colour instead — a
+      // weathering channel such as coinGrime or coinFoot, or a lighting term
+      // such as reflectedLight.indirectSpecular — which is how the wear map
+      // was found to be interpolating to 1 across the whole field, and how the
+      // field was found to be outshining the relief.
+      import * as THREE from 'three';
+      import { loadDiceAssets } from '/src/assets.ts';
+      import { createEnvironment, createLights } from '/src/scene/environment.ts';
+      import { installGT7ToneMapping } from '/src/scene/tonemap.ts';
+      import { createTray, TRAY } from '/src/scene/tray.ts';
+      import { createCoinMaterial } from '/src/scene/coin-material.ts';
+
+      const params = new URLSearchParams(location.search);
+      const size = Number(params.get('size') || 512);
+      const debug = params.get('debug');
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+      renderer.setSize(size, size, false);
+      renderer.shadowMap.enabled = true;
+      installGT7ToneMapping();
+      renderer.toneMapping = THREE.CustomToneMapping;
+      renderer.toneMappingExposure = 2.89;
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      document.body.appendChild(renderer.domElement);
+
+      const scene = new THREE.Scene();
+      scene.environment = createEnvironment(renderer);
+      for (const light of createLights(TRAY.innerWidth, TRAY.innerDepth, 2048)) scene.add(light);
+      scene.add(createTray().group);
+
+      const assets = await loadDiceAssets();
+      const coin = createCoinMaterial(JSON.parse(params.get('coin') || '{}'));
+      coin.material.envMap = createEnvironment(renderer, true);
+      if (params.get('env')) coin.material.envMapIntensity = Number(params.get('env'));
+      await coin.ready;
+      if (debug) {
+        const patch = coin.material.onBeforeCompile;
+        coin.material.onBeforeCompile = (shader, renderer) => {
+          patch(shader, renderer);
+          shader.fragmentShader = shader.fragmentShader.replace(
+            '#include <dithering_fragment>',
+            `gl_FragColor = vec4(vec3(${debug}), 1.0);`,
+          );
+        };
+        coin.material.customProgramCacheKey = () => `coin-debug-${debug}`;
+      }
+
+      const mesh = new THREE.Mesh(assets.geometries.coin, coin.material);
+      mesh.castShadow = mesh.receiveShadow = true;
+      mesh.position.set(0, TRAY.floorY + assets.info.coin.inradius, 0);
+      if (params.get('tails')) mesh.rotation.x = Math.PI;
+      mesh.rotation.y = Number(params.get('yaw') || 0.4);
+      scene.add(mesh);
+
+      // Roughly the reveal's framing: in front, looking down.
+      const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 100);
+      const elevation = (Number(params.get('elev') || 58) * Math.PI) / 180;
+      const distance = Number(params.get('dist') || 3.2);
+      camera.position.set(0, TRAY.floorY + Math.sin(elevation) * distance, Math.cos(elevation) * distance);
+      camera.lookAt(0, TRAY.floorY + 0.1, 0);
+      renderer.render(scene, camera);
+      window.__done = true;
+    </script>
+  </body>
+</html>
