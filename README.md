@@ -438,24 +438,43 @@ what the material works from.
 
 ### Its metal
 
-The coin is gold that has been handled for a long time, and none of it is a
+The coin is gold that has been handled for a very long time, and none of it is a
 texture. Fresh gold is a mirror with a colour, and a mirror with a colour is not
 much to look at; what makes a coin read as a coin is everything that has happened
 to it since it was struck, and all of that follows the shape:
 
 - The high points — the rim and the raised relief — are what fingers, pockets and
-  other coins have rubbed, so they are the clean metal, a shade brighter than the
-  rest and the most polished.
-- The field between them is where the dirt stays. It was struck matte and has been
-  toned by a lifetime of small wear, so it sits rougher than the relief, a little
-  darker, and under patches of grime that thicken toward the foot of every wall,
-  where a thumb cannot reach. Grime is a dielectric sitting on the gold, so it
-  takes low metalness and high roughness rather than merely a darker colour: it
-  stops reflecting the room and starts scattering the key.
-- The exposed metal carries hairline scratches that run around the coin rather
-  than across it, the marks of being turned in a hand, as a soft brushed sheen in
-  the roughness and a faint tilt in the normal.
-- Over that, broad soft tarnish, and the odd pit.
+  other coins have rubbed, so they are the cleanest, brightest metal.
+- The field between them is toned darker and sits under patches of grime that
+  thicken toward the foot of every wall, where a thumb cannot reach. Grime is a
+  dielectric sitting on the gold, so it takes low metalness and high roughness
+  rather than merely a darker colour: it stops reflecting the room and starts
+  scattering the key.
+- Nothing on it has one roughness. Wear comes in patches — here a spot rubbed
+  back to a near mirror, there a broad dull area the polish never reached, and
+  everything between — from a slow noise sharpened by a finer one, with the high
+  points shifted toward the polished end and the edge, rubbed by everything and
+  polished by nothing, held dull. That variation, more than any colour, is what
+  says the metal is old.
+- Over that, toning: the reddish-brown film old gold takes on, in soft patches,
+  thickest in the sheltered field.
+- The scratches are three families of hairlines in different directions across
+  the faces, each bent a little by a slow warp so that no two are parallel and
+  none is straight, and a separate family that runs around the circumference on
+  the edge. Each is a groove — the surface is cut at the point and a small step
+  along two directions across it, and the difference tilts the normal — that is
+  rougher along its floor. And dents: soft pits a few pixels across, most of them
+  on the exposed metal that has taken the knocks.
+
+None of it glitters. Every feature that is switched on by a threshold — a
+scratch, a dent — is switched on across the width of a pixel rather than at a
+point, using the screen-space derivative of the noise it comes from, and no
+feature is finer than a couple of pixels at the reveal's framing. A pattern finer
+than a pixel does not draw as a pattern; it draws as sparkle that crawls when the
+camera moves, and the first version of this coin did exactly that. The grooves
+are the one place a screen-space derivative is not used: their slope is a height
+difference over a fixed step in the coin's own space, so a scratch is the same
+groove at any distance rather than a sharper one the further away it is.
 
 The asset build stores how deep into a recess each vertex sits in the UV slot the
 coin has no use for, and bakes how far each point of the field is from the foot
@@ -470,10 +489,12 @@ Three more things went wrong on the way, each found with `npm run coin:look`,
 which draws the coin alone under the app's real lighting in a few seconds and can
 write any channel of the shader out as the picture.
 
-The scratches were first laid down at 170 rings to the unit, which at the
+The scratches were first laid down as rings, 170 to the unit, which at the
 reveal's framing is finer than a pixel, and a pattern finer than a pixel does not
 draw as lines: it draws as glitter, and the relief came out as a crumbly sparkle.
-They are now thirty to the unit, a few pixels apart.
+The rings also striped the coin's edge, where the radius they were keyed to is
+constant, so the edge showed vertical bands. Hence the hairline families above,
+and the edge's own circumferential family.
 
 The field outshone the relief. Measured off the render, the field sat at 180 out
 of 255 and the polished relief at 137 — the coin inside out, since the high
