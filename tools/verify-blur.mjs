@@ -176,6 +176,10 @@ try {
     return !l || l.classList.contains('done');
   }, { timeout: 180000 });
 
+  // A fixed throw. These checks measure the picture after the dice land, and an
+  // unseeded roll measures a different pose every run — which is how this one
+  // came to report anything between 8.6% and 53.6% on code that had not changed.
+  await page.evaluate(() => window.dicer.debug.seed(2));
   await page.evaluate(() => window.dicer.debug.setPool(['d20']));
   await page.evaluate(() => window.dicer.debug.roll(0, -1, 0.7));
   await page.waitForFunction('window.dicer.debug.state().settled === true', null, { polling: 250, timeout: 300000 });

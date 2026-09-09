@@ -94,10 +94,56 @@ export interface StepResult {
   justSettled: boolean;
 }
 
+/**
+ * Mulberry32: small, fast, and good enough that a seeded roll looks like a roll.
+ * Only ever used to make a throw repeatable for a check — the app runs on
+ * Math.random.
+ */
+/** The frame a seeded run pretends to have, whatever the machine is doing. */
+export const SEEDED_FRAME = 1 / 60;
+
+function seededRandom(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 export class DiceWorld {
   readonly world: RAPIER.World;
   readonly dice: Die[] = [];
   readonly group = new THREE.Group();
+
+  /**
+   * Where every random number in a throw comes from: the launch positions, the
+   * spread, the spin, the rescue kicks, all of it.
+   *
+   * It is a field rather than a call to Math.random so a check can pin it down.
+   * Several of the checks here roll the dice and then measure the picture, and
+   * with an unseeded throw they measure a different pose every run — which is
+   * how `verify:flakes` came to report anything between 8.6% and 53.6% on
+   * unchanged code, and cost real time deciding whether a failure was a
+   * regression each time it crossed its limit.
+   */
+  private random: () => number = Math.random;
+
+  /**
+   * True while a seed is pinned, which also pins the timestep. See `step`.
+   *
+   * Read by the app so it can pin the whole frame, not just the solver: the
+   * camera's idle drift is a function of elapsed time too, so a seeded run with a
+   * wall-clock frame still frames the dice from a slightly different place.
+   */
+  seeded = false;
+
+  /** Pins the throw to a repeatable sequence, or hands it back to Math.random. */
+  setSeed(seed: number | null) {
+    this.seeded = seed !== null;
+    this.random = seed === null ? Math.random : seededRandom(seed);
+  }
 
   private readonly rapier: typeof RAPIER;
   private readonly assets: DiceAssets;
@@ -283,7 +329,7 @@ export class DiceWorld {
       const die = this.createDie(type);
       const info = this.assets.info[type];
       die.body.setTranslation({ x, y: TRAY.floorY + info.inradius + 0.02, z }, true);
-      die.body.setRotation(randomQuaternion(), true);
+      die.body.setRotation(randomQuaternion(this.random), true);
       die.teleported = true;
       this.dice.push(die);
     });
@@ -376,7 +422,7 @@ export class DiceWorld {
     // pool's slots could not be independent by construction.
     const slots = this.dice.map((_, i) => i);
     for (let i = slots.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
+      const j = Math.floor(this.random() * (i + 1));
       [slots[i], slots[j]] = [slots[j], slots[i]];
     }
 
@@ -384,30 +430,30 @@ export class DiceWorld {
       const slot = slots[index];
       const jitter = 0.6;
       const angle = (slot / Math.max(1, this.dice.length)) * Math.PI * 2;
-      const x = originX + Math.cos(angle) * jitter + (Math.random() - 0.5) * 0.5;
-      const z = originZ + Math.sin(angle) * jitter + (Math.random() - 0.5) * 0.5;
-      const y = TRAY.floorY + 4.2 + Math.random() * 1.8 + slot * 0.3;
+      const x = originX + Math.cos(angle) * jitter + (this.random() - 0.5) * 0.5;
+      const z = originZ + Math.sin(angle) * jitter + (this.random() - 0.5) * 0.5;
+      const y = TRAY.floorY + 4.2 + this.random() * 1.8 + slot * 0.3;
 
       die.body.setTranslation({ x, y, z }, true);
-      die.body.setRotation(randomQuaternion(), true);
+      die.body.setRotation(randomQuaternion(this.random), true);
       die.teleported = true;
 
-      const spread = (Math.random() - 0.5) * 0.22;
+      const spread = (this.random() - 0.5) * 0.22;
       const cos = Math.cos(spread);
       const sin = Math.sin(spread);
       const dx = heading.x * cos - heading.y * sin;
       const dz = heading.x * sin + heading.y * cos;
-      const variance = 0.86 + Math.random() * 0.28;
+      const variance = 0.86 + this.random() * 0.28;
 
       die.body.setLinvel(
-        { x: dx * speed * variance, y: lift * (0.75 + Math.random() * 0.5), z: dz * speed * variance },
+        { x: dx * speed * variance, y: lift * (0.75 + this.random() * 0.5), z: dz * speed * variance },
         true,
       );
       die.body.setAngvel(
         {
-          x: (Math.random() - 0.5) * 2 * spin,
-          y: (Math.random() - 0.5) * 2 * spin,
-          z: (Math.random() - 0.5) * 2 * spin,
+          x: (this.random() - 0.5) * 2 * spin,
+          y: (this.random() - 0.5) * 2 * spin,
+          z: (this.random() - 0.5) * 2 * spin,
         },
         true,
       );
@@ -428,6 +474,15 @@ export class DiceWorld {
   }
 
   step(delta: number): StepResult {
+    // A seeded run must not depend on how fast the machine happens to be.
+    //
+    // The solver accumulates real elapsed time, so the number of substeps a frame
+    // takes — and therefore the whole trajectory — follows the wall clock. Seeding
+    // the random numbers alone did not make a throw repeatable for exactly this
+    // reason: two runs of the same seed put the dice in different places, because
+    // the frames in between were not the same length. Pinning the timestep as well
+    // is what makes it the same roll twice.
+    if (this.seeded) delta = SEEDED_FRAME;
     const impacts: Impact[] = [];
     this.accumulator += Math.min(delta, 0.1) / TIME_SCALE;
 
@@ -536,19 +591,19 @@ export class DiceWorld {
 
     if (die.nudges <= KICKS_BEFORE_REDROP) {
       const kick = 3.4 + die.nudges * 1.2;
-      die.body.setLinvel({ x: (Math.random() - 0.5) * kick, y: kick, z: (Math.random() - 0.5) * kick }, true);
+      die.body.setLinvel({ x: (this.random() - 0.5) * kick, y: kick, z: (this.random() - 0.5) * kick }, true);
       die.body.setAngvel(
-        { x: (Math.random() - 0.5) * 22, y: (Math.random() - 0.5) * 22, z: (Math.random() - 0.5) * 22 },
+        { x: (this.random() - 0.5) * 22, y: (this.random() - 0.5) * 22, z: (this.random() - 0.5) * 22 },
         true,
       );
     } else {
       const spot = this.clearSpot(die);
       die.body.setTranslation({ x: spot.x, y: TRAY.floorY + 3.2, z: spot.z }, true);
-      die.body.setRotation(randomQuaternion(), true);
+      die.body.setRotation(randomQuaternion(this.random), true);
       die.teleported = true;
       die.body.setLinvel({ x: 0, y: -3, z: 0 }, true);
       die.body.setAngvel(
-        { x: (Math.random() - 0.5) * 14, y: (Math.random() - 0.5) * 14, z: (Math.random() - 0.5) * 14 },
+        { x: (this.random() - 0.5) * 14, y: (this.random() - 0.5) * 14, z: (this.random() - 0.5) * 14 },
         true,
       );
     }
@@ -570,8 +625,8 @@ export class DiceWorld {
     let bestGap = -Infinity;
 
     for (let attempt = 0; attempt < 12; attempt++) {
-      const x = (Math.random() - 0.5) * TRAY.innerWidth * 0.55;
-      const z = (Math.random() - 0.5) * TRAY.innerDepth * 0.55;
+      const x = (this.random() - 0.5) * TRAY.innerWidth * 0.55;
+      const z = (this.random() - 0.5) * TRAY.innerDepth * 0.55;
       let gap = Infinity;
       for (const other of this.dice) {
         if (other === die) continue;
@@ -643,11 +698,11 @@ export class DiceWorld {
   }
 }
 
-function randomQuaternion(): { x: number; y: number; z: number; w: number } {
+function randomQuaternion(random: () => number): { x: number; y: number; z: number; w: number } {
   // Shoemake's uniform random rotation.
-  const u1 = Math.random();
-  const u2 = Math.random() * Math.PI * 2;
-  const u3 = Math.random() * Math.PI * 2;
+  const u1 = random();
+  const u2 = random() * Math.PI * 2;
+  const u3 = random() * Math.PI * 2;
   const a = Math.sqrt(1 - u1);
   const b = Math.sqrt(u1);
   return { x: a * Math.sin(u2), y: a * Math.cos(u2), z: b * Math.sin(u3), w: b * Math.cos(u3) };

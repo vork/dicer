@@ -713,18 +713,13 @@ And it runs the same die at 120, 60, 30 and 20fps and measures the gap each one
 leaves unblurred, which is the claim the shutter curve exists to make good. Those
 are the numbers quoted above.
 
-One note on `npm run verify:flakes`, which failed once during this work and sent
-me looking in the wrong place. It reports the worst of eighty samples taken on a
-die in whatever pose a random throw left it, and that statistic turns out to sit
-close enough to its own limit to cross it by chance: four runs gave 8.6%, 53.6%,
-16.5% and 24.7%, at a different grain each time, against a limit of 25%. The last
-of those was run with the motion blur pinned off, which is what rules the blur out
-— on a settled scene with the camera held it is a pass-through, and `verify:blur`
-shows a still frame coming back bit-identical with it on. The check now pins the
-blur off anyway, for the same reason it already pins the film grain and freezes
-the camera. What would actually fix it is seeding the throw so the pose is the
-same every run; the randomness is in the physics rather than in the check, so that
-is a larger change than it looks and it is not done.
+One note on `npm run verify:flakes`, which failed twice during this work and sent
+me looking in the wrong place both times. It reports the worst of eighty samples
+taken on a die in whatever pose a random throw left it, and that statistic sat
+close enough to its own limit to cross it by chance: six runs gave 8.6%, 16.5%,
+14.0%, 24.7%, 47.3% and 53.6%, at a different grain every time, against a limit of
+25%. That is fixed now — see **A repeatable throw** below — and with the pose
+pinned it lands at 11-13% whatever else changes.
 
 ## The sound
 
@@ -992,6 +987,47 @@ the wrong thing:
   reported 0.3% of the energy above 5.5kHz for a sound with an obvious top end.
   Half a Hann, full weight at the start and tapering to nothing at the end, is the
   right shape for something that begins loud and decays.
+
+## A repeatable throw
+
+Several checks here roll the dice and then measure the picture, and for a long
+time they measured a different picture every run. `verify:flakes` reports the
+worst of eighty samples on a settled die, and across six runs on unchanged code it
+gave 8.6%, 16.5%, 14.0%, 24.7%, 47.3% and 53.6% — at a different zoom level every
+time, against a limit of 25%. Twice it crossed that limit right after an unrelated
+change and cost an hour deciding whether the change was at fault. `verify:blur`
+had the same disease in a different form: it set its test displacement in world
+units, so how close the camera happened to frame the settled die decided how many
+pixels that was, and at one framing the die left the viewport and the check passed
+on an empty picture.
+
+`debug.seed(n)` pins the throw. Two things had to be pinned, and the first alone
+did nothing:
+
+**The random numbers.** Every random draw in a throw — launch positions, spread,
+spin, rescue kicks, the uniform random rotations — now comes from a generator held
+on `DiceWorld` rather than from `Math.random` directly, and `setSeed` swaps in a
+seeded mulberry32. The app itself still runs on `Math.random`.
+
+**The timestep.** Seeding the numbers alone left the throws as varied as before,
+because the solver accumulates real elapsed time: how many substeps a frame takes
+follows the wall clock, so the same seed on a busier machine is a different
+trajectory. A seeded run now advances by a fixed frame instead. The app pins the
+whole frame rather than just the solver, since the camera's idle drift is a
+function of elapsed time too — pinning only the physics put the dice in the same
+place but framed them from a slightly different one.
+
+Measured directly, two seeded runs now settle a d20 at exactly the same
+coordinates to six decimal places. The camera still lands within 0.04%, because
+the checks synchronise on wall-clock waits rather than on a frame count, and that
+is worth about a point in the flake statistic — against the forty-point swings it
+used to have. With the pose pinned, `verify:flakes` reports 11.9% and 12.7% on
+consecutive runs where before it was a lottery.
+
+That also settled the question the seeding was built to answer. The 47.3% failure
+arrived immediately after multisampling went in, and with the throw pinned the same
+check gives 11.9% and 12.7% with multisampling on and 11.2% with it off. It was the
+pose, not the antialiasing.
 
 ## Tooling
 

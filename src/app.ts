@@ -7,7 +7,7 @@ import { createTray, TRAY } from './scene/tray';
 import { createDiceMaterial, type DiceMaterial, type FlakeSettings } from './scene/dice-material';
 import { createPostFx, type PostFx } from './scene/postfx';
 import { installGT7ToneMapping } from './scene/tonemap';
-import { DiceWorld } from './physics/dice-world';
+import { DiceWorld, SEEDED_FRAME } from './physics/dice-world';
 import { CameraDirector } from './camera-director';
 import { ThrowInput } from './input/throw-input';
 import { Hud } from './ui/hud';
@@ -216,7 +216,13 @@ export class App {
 
   private tick = () => {
     if (!this.running) return;
-    const delta = Math.min(this.clock.getDelta(), 0.05);
+    // Pinned for a seeded run, so the camera's drift and the reveal's timers are
+    // as repeatable as the throw. Pinning the solver alone was not enough: the
+    // same seed put the dice in the same place but framed them from slightly
+    // different ones, because the frames in between were still wall-clock.
+    const delta = this.diceWorld.seeded
+      ? SEEDED_FRAME
+      : Math.min(this.clock.getDelta(), 0.05);
     // Held still so a tool can pose the scene by hand and render single frames.
     // Motion blur is a function of where things were drawn last frame, so
     // measuring it needs the frames under test to be the only ones happening.
@@ -298,6 +304,7 @@ export class App {
       wallDistance: (y: number, dx: number, dz: number) => this.diceWorld.wallDistance(y, dx, dz),
       roll: (x: number, z: number, power: number) => this.throwDice(new THREE.Vector2(x, z), power),
       setPool: (pool: DieType[]) => this.hud.setPool(pool),
+      seed: (seed: number | null) => this.diceWorld.setSeed(seed),
       setSet: (id: string) => this.selectSet(id),
       setMode: (mode: ResultMode) => {
         this.resultMode = mode;

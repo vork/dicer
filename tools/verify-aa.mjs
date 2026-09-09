@@ -64,6 +64,10 @@ try {
   );
   console.log(`  pixel ratio ${setup.pixelRatio}, so nothing is being supersampled either\n`);
 
+  // A fixed throw. These checks measure the picture after the dice land, and an
+  // unseeded roll measures a different pose every run — which is how this one
+  // came to report anything between 8.6% and 53.6% on code that had not changed.
+  await page.evaluate(() => window.dicer.debug.seed(3));
   await page.evaluate(() => window.dicer.debug.setPool(['d20', 'd12']));
   await page.evaluate(() => window.dicer.debug.roll(0.15, -1, 0.72));
   await page.waitForFunction('window.dicer.debug.state().settled === true', null, { polling: 250, timeout: 300000 });
