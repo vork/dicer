@@ -307,12 +307,15 @@ body {
   white-space: nowrap;
 }
 
+/*
+ * The first row of the footer, so it always sits just above the pool whatever
+ * the footer's height. Fixed at three quarters of the way down the screen, it
+ * landed on the pool chips on a tall phone and on the tray's lip on a desktop.
+ * It keeps its row when hidden, so nothing below it moves.
+ */
 .hint {
-  position: fixed;
-  left: 50%;
-  top: 74%;
-  transform: translate(-50%, -50%);
-  z-index: 15;
+  grid-area: hint;
+  justify-self: center;
   font-size: 11px;
   letter-spacing: 0.4em;
   text-transform: uppercase;
@@ -335,15 +338,28 @@ body {
 
 /* ---------- controls ---------- */
 
+/*
+ * One footer, two layouts, no reordering in script. The rows are named grid
+ * areas: on a desktop the pool sits over the die picker, with Roll beside the
+ * picker and the reading mode and colours below; on a phone every row gets the
+ * full width and Roll drops to the bottom, under the thumb. Clear lives with
+ * the pool it clears, on every size.
+ */
 .controls {
   position: fixed;
   left: 0;
   right: 0;
   bottom: 0;
   z-index: 20;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas:
+    'hint hint'
+    'pool pool'
+    'picker actions'
+    'secondary secondary';
+  align-items: center;
+  gap: 10px 12px;
   padding: 16px 18px calc(16px + var(--safe-b));
   background: linear-gradient(to top, rgba(5, 5, 8, 0.9) 20%, rgba(5, 5, 8, 0));
   transition: opacity 400ms ease, transform 400ms ease;
@@ -355,7 +371,15 @@ body {
   pointer-events: none;
 }
 
+.pool-row {
+  grid-area: pool;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .tray-row {
+  flex: 1;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -369,6 +393,11 @@ body {
   letter-spacing: 0.3em;
   text-transform: uppercase;
   color: var(--ink-faint);
+}
+
+.clear-button {
+  padding: 6px 12px;
+  font-size: 11px;
 }
 
 .pool-chip {
@@ -415,14 +444,10 @@ body {
   text-align: center;
 }
 
-.control-row {
+.secondary {
+  grid-area: secondary;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.control-row.secondary {
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 10px;
@@ -466,12 +491,14 @@ body {
 }
 
 .picker {
+  grid-area: picker;
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
 }
 
 .die-button {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -499,7 +526,7 @@ body {
   transform: translateY(1px);
 }
 
-/* Outlined rather than filled: with six types selectable at once, six solid
+/* Outlined rather than filled: with seven types selectable at once, seven solid
    gold buttons overwhelm the bar. The count badge carries the emphasis. */
 .die-button.active {
   color: var(--gold);
@@ -532,6 +559,7 @@ body {
 }
 
 .actions {
+  grid-area: actions;
   display: flex;
   gap: 8px;
   flex-shrink: 0;
@@ -606,27 +634,93 @@ body {
   box-shadow: 0 0 0 1px #07070a, 0 0 0 2px var(--gold);
 }
 
+/*
+ * Phones. Seven die buttons share the width as equal cells, the count moves to
+ * a corner badge so the label alone sets the cell's width, the reading mode
+ * becomes a full-width segmented control with the colours tucked beside it,
+ * and Roll takes the whole bottom row.
+ */
 @media (max-width: 560px) {
-  .control-row {
-    flex-wrap: wrap;
+  .controls {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      'hint'
+      'pool'
+      'picker'
+      'secondary'
+      'actions';
+    gap: 10px;
+    padding: 12px 12px calc(12px + var(--safe-b));
+  }
+
+  .pool-chip {
+    gap: 2px;
+  }
+
+  .pool-chip-label {
+    min-width: 0;
+    padding: 0 4px;
+  }
+
+  .clear-button {
+    padding: 6px 10px;
   }
 
   .picker {
-    order: 2;
-    width: 100%;
+    gap: 5px;
+    flex-wrap: nowrap;
   }
 
   .die-button {
     flex: 1;
     min-width: 0;
+    gap: 0;
+    padding: 11px 0;
+    font-size: 11px;
+    letter-spacing: 0.02em;
   }
 
-  .actions {
-    order: 1;
-    width: 100%;
+  .die-count {
+    position: absolute;
+    top: -6px;
+    right: -5px;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 4px;
+    font-size: 10px;
+    box-shadow: 0 0 0 2px #0b0b10;
+  }
+
+  .secondary {
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+
+  .modes {
+    flex: 1;
+  }
+
+  .mode-button {
+    flex: 1;
+    padding: 9px 0;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+  }
+
+  .swatches {
+    flex-shrink: 0;
+    flex-wrap: nowrap;
+    gap: 5px;
+  }
+
+  .swatch {
+    width: 18px;
+    height: 18px;
   }
 
   .actions > * {
     flex: 1;
+    padding: 13px 18px;
+    font-size: 13px;
   }
 }

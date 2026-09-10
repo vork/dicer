@@ -14,6 +14,11 @@ on, up to twelve; the button carries a running count and each pool chip is a −
 stepper. Then click or tap anywhere to throw. Swipe instead and the direction and
 speed of the flick become the direction and force of the throw.
 
+The controls are one footer laid out as a grid of named rows: on a desktop the
+pool sits over the die picker with Roll beside it, on a phone every row takes the
+full width, the seven die buttons share it as equal cells with the count as a
+corner badge, and Roll drops to the bottom under the thumb.
+
 **Sum / Highest / Lowest** decides how the pool collapses into the one number that
 gets flashed. Highest and lowest are advantage and disadvantage: the dice that did
 not count stay in the breakdown, dimmed and struck through, and a natural 20 or 1
@@ -73,12 +78,17 @@ src/
   input/throw-input.ts   pointer gesture -> world throw vector
   physics/dice-world.ts  Rapier world, tray colliders, settle detection
   scene/
-    environment.ts       procedural studio environment + lights
+    environment.ts       procedural studio environment + lights, the coin's reflector
     tray.ts              tray geometry
+    tray-ao.ts           analytic occlusion of the felt by the walls
     textures.ts          procedural felt and leather maps
-    postfx.ts            bloom, vignette, grain, chromatic aberration
+    dice-material.ts     resin over metallic flake
+    coin-material.ts     old gold, over the baked wear and surface maps
+    tonemap.ts           GT7 tone mapping
+    postfx.ts            bloom, vignette, grain, chromatic aberration, motion blur
   ui/hud.ts              dice pool, result flash, aim indicator
 tools/                   asset pipeline and headless verification
+  coin-surface.mjs       bakes the coin's slope maps
 ```
 
 ## Deploying

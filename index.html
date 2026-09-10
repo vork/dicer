@@ -35,7 +35,6 @@
       <div class="reveal-breakdown" id="reveal-breakdown"></div>
     </div>
 
-    <div id="hint" class="hint">flick to roll</div>
 
     <header class="topbar">
       <div class="brand">
@@ -54,19 +53,18 @@
     </header>
 
     <footer class="controls" id="controls">
-      <div class="tray-row" id="pool" aria-label="Dice pool"></div>
-
-      <div class="control-row">
-        <div class="picker" id="die-picker" role="group" aria-label="Add a die"></div>
-        <div class="actions">
-          <button id="clear" class="ghost-button" type="button">Clear</button>
-          <button id="roll" class="primary-button" type="button">Roll</button>
-        </div>
+      <div id="hint" class="hint">flick to roll</div>
+      <div class="pool-row">
+        <div class="tray-row" id="pool" aria-label="Dice pool"></div>
+        <button id="clear" class="ghost-button clear-button" type="button">Clear</button>
       </div>
-
-      <div class="control-row secondary">
-        <div class="swatches" id="swatches" role="group" aria-label="Dice colour"></div>
+      <div class="picker" id="die-picker" role="group" aria-label="Add a die"></div>
+      <div class="actions">
+        <button id="roll" class="primary-button" type="button">Roll</button>
+      </div>
+      <div class="secondary">
         <div class="modes" id="modes" role="group" aria-label="How to read the pool"></div>
+        <div class="swatches" id="swatches" role="group" aria-label="Dice colour"></div>
       </div>
     </footer>
 
