@@ -481,6 +481,20 @@ to it since it was struck, and all of that follows the shape:
   channels and roughen and darken their floors.
 - Old gold is not one yellow: the recesses run warmer and deeper, the rubbed
   metal paler, and the whole field sees less of the room than the high points.
+- The roughness is detailed down to the pixel: under the wear map, four octaves
+  of mottle and a scatter of dull specks, each octave faded out as its
+  wavelength closes on the size of a pixel — the fragment's footprint in the
+  coin's own space against the octave's frequency — so the finest detail is
+  there when the coin fills the screen and gone, rather than shimmering, when it
+  is small. The scratches themselves are kept quiet, shallow in the bake and
+  faint in the roughness, with the dirt of a lifetime settled into them.
+- The walls of the relief get neither map: they stand where the face map's
+  slopes mean nothing and the edge strip's mean something else, so they carry
+  only the swell and grain. The strip wraps, and where the angle wraps with it
+  the coordinate jumps by a whole texture inside one pixel, which the sampler
+  reads as a footprint the width of the strip and answers with the smallest mip,
+  a seam; the gradient is taken instead from whichever of two copies of the
+  coordinate, half a turn apart, is continuous at that pixel.
 
 The map stores slopes rather than normals: how much the surface rises per unit
 along each of the two directions it is sampled by. A slope is the same number
@@ -498,6 +512,14 @@ Euclidean distance transform over the rasterised relief, which also feeds the
 grime map. Baking the swell and grain too made the map two megabytes — noise in
 every texel — where the damage alone, flat everywhere else, is under four
 hundred kilobytes.
+
+The welding is by smoothing group: faces that share an edge and meet at less
+than the crease are one group, and a corner's normal is the average of every face
+of its group at that position. The usual shortcut — average each corner against
+whatever faces lie within the crease of its own face — gave the rim a dozen
+seams: on an irregularly faceted surface the two faces either side of an edge see
+different sets, get different normals for the same point, and the edge shows,
+with the baked scratches jumping across it.
 
 The asset build stores how deep into a recess each vertex sits in the UV slot the
 coin has no use for, and bakes how far each point of the field is from the foot

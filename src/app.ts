@@ -121,7 +121,7 @@ export class App {
 
     this.dice = createDiceMaterial();
     this.diceMaterial = this.dice.material;
-    this.coin = createCoinMaterial(undefined, this.assets.info.coin.inradius);
+    this.coin = createCoinMaterial(undefined, this.assets.info.coin.inradius, this.assets.info.coin.faces[0].extent);
     // Its own room: the plain one shows a flat face nothing but the dark shell.
     this.coin.material.envMap = createEnvironment(this.renderer, true);
     await this.coin.ready;

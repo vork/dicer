@@ -328,16 +328,16 @@ export function bakeFace({ raised, size, extent, rim, seed }) {
 
   // Scratches: many, thin, shallow, every length and direction. Favouring the
   // exposed metal a little, since the field is sheltered by the relief.
-  for (let n = 0; n < 170; n++) {
+  for (let n = 0; n < 150; n++) {
     const a = random() * Math.PI * 2;
     const r = Math.sqrt(random()) * rim;
     const x = Math.cos(a) * r, z = Math.sin(a) * r;
     const direction = random() * Math.PI * 2;
     const length = 0.03 + random() ** 2 * 0.4;
     const halfWidth = (0.002 + random() * 0.003) / texel;
-    // Shallow: a hairline is seen by its highlight, not its depth. Twice this
-    // and the faces read as hatched.
-    const depth = 0.0006 + random() ** 2 * 0.002;
+    // Shallow: a hairline is seen by its highlight, not its depth. Three times
+    // this and the faces read as hatched.
+    const depth = 0.0004 + random() ** 2 * 0.0012;
     const ex = x + Math.cos(direction) * length, ez = z + Math.sin(direction) * length;
     if (!inCoin(x, z)) continue;
     groove(height, scratches, 0.5, grid, texel, false, toTexel(x), toTexel(z), toTexel(ex), toTexel(ez), halfWidth, depth);

@@ -84,50 +84,87 @@ function readStl(file) {
  */
 function weld(position, creaseDegrees) {
   const triangles = position.length / 9;
-  const faceNormal = new Float32Array(triangles * 3);
+  // Unnormalised: twice the area times the normal, so the average is area-weighted.
+  const faceNormal = new Float64Array(triangles * 3);
+  const unit = new Float64Array(triangles * 3);
   for (let t = 0; t < triangles; t++) {
     const p = position.subarray(t * 9, t * 9 + 9);
     const ux = p[3] - p[0], uy = p[4] - p[1], uz = p[5] - p[2];
     const vx = p[6] - p[0], vy = p[7] - p[1], vz = p[8] - p[2];
-    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    faceNormal[t * 3] = nx;
+    faceNormal[t * 3 + 1] = ny;
+    faceNormal[t * 3 + 2] = nz;
     const l = Math.hypot(nx, ny, nz) || 1;
-    faceNormal[t * 3] = nx / l;
-    faceNormal[t * 3 + 1] = ny / l;
-    faceNormal[t * 3 + 2] = nz / l;
+    unit[t * 3] = nx / l;
+    unit[t * 3 + 1] = ny / l;
+    unit[t * 3 + 2] = nz / l;
   }
   const key = (i) => `${position[i].toFixed(4)},${position[i + 1].toFixed(4)},${position[i + 2].toFixed(4)}`;
-  const around = new Map();
+
+  // Smoothing groups. Two faces that share an edge and meet at less than the
+  // crease are in one group, and a corner's normal is the average of every face
+  // of its group at that position. Averaging each corner against whatever faces
+  // happened to lie within the crease of its own face — the usual shortcut — is
+  // not the same thing: on an irregularly faceted surface the two faces either
+  // side of an edge see different sets, get different normals for the same
+  // point, and the edge shows as a seam. The coin's rim had a dozen of them.
+  const parent = new Int32Array(triangles);
+  for (let t = 0; t < triangles; t++) parent[t] = t;
+  const find = (t) => {
+    while (parent[t] !== t) {
+      parent[t] = parent[parent[t]];
+      t = parent[t];
+    }
+    return t;
+  };
+  const cosCrease = Math.cos((creaseDegrees * Math.PI) / 180);
+  const edges = new Map();
   for (let t = 0; t < triangles; t++) {
     for (let c = 0; c < 3; c++) {
-      const k = key(t * 9 + c * 3);
-      if (!around.has(k)) around.set(k, []);
-      around.get(k).push(t);
+      const a = key(t * 9 + c * 3);
+      const b = key(t * 9 + ((c + 1) % 3) * 3);
+      const e = a < b ? `${a}|${b}` : `${b}|${a}`;
+      const other = edges.get(e);
+      if (other === undefined) {
+        edges.set(e, t);
+        continue;
+      }
+      const dot = unit[t * 3] * unit[other * 3] + unit[t * 3 + 1] * unit[other * 3 + 1] + unit[t * 3 + 2] * unit[other * 3 + 2];
+      if (dot >= cosCrease) parent[find(t)] = find(other);
     }
   }
-  const cosCrease = Math.cos((creaseDegrees * Math.PI) / 180);
+
+  const sums = new Map();
+  for (let t = 0; t < triangles; t++) {
+    const g = find(t);
+    for (let c = 0; c < 3; c++) {
+      const k = `${key(t * 9 + c * 3)}|${g}`;
+      let sum = sums.get(k);
+      if (!sum) sums.set(k, (sum = [0, 0, 0]));
+      sum[0] += faceNormal[t * 3];
+      sum[1] += faceNormal[t * 3 + 1];
+      sum[2] += faceNormal[t * 3 + 2];
+    }
+  }
+
   const outPosition = [];
   const outNormal = [];
   const index = new Uint32Array(triangles * 3);
   const cache = new Map();
   for (let t = 0; t < triangles; t++) {
-    const fx = faceNormal[t * 3], fy = faceNormal[t * 3 + 1], fz = faceNormal[t * 3 + 2];
+    const g = find(t);
     for (let c = 0; c < 3; c++) {
       const i = t * 9 + c * 3;
-      const k = key(i);
-      let nx = 0, ny = 0, nz = 0;
-      for (const u of around.get(k)) {
-        const gx = faceNormal[u * 3], gy = faceNormal[u * 3 + 1], gz = faceNormal[u * 3 + 2];
-        if (fx * gx + fy * gy + fz * gz >= cosCrease) { nx += gx; ny += gy; nz += gz; }
-      }
-      const l = Math.hypot(nx, ny, nz) || 1;
-      nx /= l; ny /= l; nz /= l;
-      const vk = `${k}|${nx.toFixed(3)},${ny.toFixed(3)},${nz.toFixed(3)}`;
-      let v = cache.get(vk);
+      const k = `${key(i)}|${g}`;
+      let v = cache.get(k);
       if (v === undefined) {
+        const [nx, ny, nz] = sums.get(k);
+        const l = Math.hypot(nx, ny, nz) || 1;
         v = outPosition.length / 3;
-        cache.set(vk, v);
+        cache.set(k, v);
         outPosition.push(position[i], position[i + 1], position[i + 2]);
-        outNormal.push(nx, ny, nz);
+        outNormal.push(nx / l, ny / l, nz / l);
       }
       index[t * 3 + c] = v;
     }

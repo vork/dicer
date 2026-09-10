@@ -60,13 +60,13 @@ export interface CoinSettings {
 }
 
 export const DEFAULT_COIN: CoinSettings = {
-  grime: 0.85,
+  grime: 1.0,
   // The floor of the roughness; the shader will not go below 0.25 anyway.
   polish: 0.25,
-  wear: 0.8,
-  scratches: 0.8,
-  patina: 0.8,
-  pits: 0.5,
+  wear: 0.9,
+  scratches: 0.6,
+  patina: 1.0,
+  pits: 0.6,
 };
 
 export interface CoinMaterial {
@@ -128,6 +128,7 @@ uniform float uCoinScratches;
 uniform float uCoinPatina;
 uniform float uCoinPits;
 uniform float uCoinHalfThickness;
+uniform float uCoinRadius;
 uniform vec3 uCoinGold;
 uniform vec3 uCoinGrimeColor;
 uniform vec3 uCoinPatinaColor;
@@ -179,6 +180,25 @@ float coinSwell(vec3 p) {
     + 0.0004 * (coinNoise(p * 90.0 + vec3(1.0, 8.0, 5.0)) - 0.5);
 }
 
+// Roughness detail, down to the pixel. Four octaves of mottle, each faded out
+// as its wavelength closes on the size of a pixel — the footprint of the
+// fragment in the coin's own space against the octave's frequency — so the
+// finest detail is there when the coin fills the screen and gone, rather than
+// shimmering, when it is small.
+float coinRoughnessDetail(vec3 p, float footprint) {
+  float fade26 = 1.0 - smoothstep(0.2, 0.6, footprint * 26.0);
+  float fade64 = 1.0 - smoothstep(0.2, 0.6, footprint * 64.0);
+  float fade150 = 1.0 - smoothstep(0.2, 0.6, footprint * 150.0);
+  return 0.1 * (coinFbm(p * 9.0 + vec3(7.0, 5.0, 3.0)) - 0.5)
+    + 0.06 * (coinNoise(p * 26.0 + vec3(2.0, 11.0, 4.0)) - 0.5) * fade26
+    + 0.08 * (coinNoise(p * 64.0 + vec3(6.0, 1.0, 9.0)) - 0.5) * fade64
+    + 0.06 * (coinNoise(p * 150.0 + vec3(3.0, 8.0, 2.0)) - 0.5) * fade150
+    // And dull specks: small spots the polish never reached at all. Kept
+    // faint and fine — at a fifth of the roughness and twice the size they
+    // drew as camouflage on the edge.
+    + 0.08 * smoothstep(0.62, 0.72, coinNoise(p * 80.0 + vec3(12.0, 4.0, 6.0))) * fade150;
+}
+
 // The surface map's four channels, decoded: slopes along the two sampling
 // directions in coin units per unit, and the two damage masks.
 vec4 coinDecodeSurface(vec4 texel) {
@@ -217,9 +237,11 @@ float coinRecessShade = coinCavity * coinFoot;
 // dull struck surface. The high points are rubbed hardest, so they lean bright.
 float coinWearSlow = coinFbm(coinP * 2.4 + vec3(21.0, 4.0, 8.0));
 float coinWearFine = coinFbm(coinP * 13.0 + vec3(2.0, 17.0, 6.0));
-float coinDull = smoothstep(0.25, 0.75, coinWearSlow + 0.35 * (coinWearFine - 0.5) + 0.12 * coinCavity - 0.1 * coinExposed);
-// The edge is rubbed by everything and polished by nothing.
-coinDull = max(coinDull, 0.6 * coinSideness);
+float coinDull = smoothstep(0.12, 0.82, coinWearSlow + 0.35 * (coinWearFine - 0.5) + 0.12 * coinCavity - 0.1 * coinExposed);
+// The edge is rubbed by everything and polished by nothing. Leaned toward
+// dull, not floored at it: a floor flattened the low end of the map and left
+// the patches above it as a two-tone camouflage around the rim.
+coinDull = mix(coinDull, 0.75, 0.7 * coinSideness);
 coinDull = mix(0.5, coinDull, uCoinWearAmount);
 
 // Toning: soft patches of reddish-brown film, thickest in the sheltered field.
@@ -228,15 +250,28 @@ float coinPatina = uCoinPatina
   * (0.35 + 0.65 * coinCavity);
 
 // The surface. On the faces the map is read by x and z, heads from the left
-// half of the atlas and tails from the right; the edge reads its strip by the
-// angle around the coin and by y. Where a wall of the relief runs from face to
-// edge the two are blended by how far the normal has turned.
+// half of the atlas and tails from the right; the coin's edge reads its strip
+// by the angle around the coin and by y. The walls of the relief are neither:
+// they stand where the face map's slopes mean nothing and the strip's mean
+// something else, so they get no map at all, only the swell and grain.
+float coinOnEdge = coinSideness * smoothstep(0.9, 0.97, coinR / uCoinRadius);
+float coinOnFace = 1.0 - coinSideness;
 vec2 coinFaceUv = vec2(coinWearUv.x * 0.5 + (coinP.y > 0.0 ? 0.0 : 0.5), coinWearUv.y);
 vec4 coinFace = coinDecodeSurface(texture2D(uCoinSurfaceMap, coinFaceUv));
+// The strip wraps, and where the angle wraps with it the coordinate jumps by a
+// whole texture inside one pixel; left to itself the sampler reads that as a
+// footprint the width of the strip and pulls the smallest mip, a seam. So the
+// gradient comes from whichever of two copies of the coordinate, half a turn
+// apart, is continuous here.
 float coinAngle = atan(coinP.z, coinP.x);
-vec2 coinEdgeUv = vec2(coinAngle / (2.0 * PI) + 0.5, coinP.y / (2.0 * uCoinHalfThickness) + 0.5);
-vec4 coinEdgeS = coinDecodeSurface(texture2D(uCoinEdgeMap, coinEdgeUv));
-vec4 coinSurface = mix(coinFace, coinEdgeS, coinSideness);
+float coinEdgeV = coinP.y / (2.0 * uCoinHalfThickness) + 0.5;
+vec2 coinEdgeUv = vec2(coinAngle / (2.0 * PI) + 0.5, coinEdgeV);
+vec2 coinEdgeUvB = vec2(fract(coinEdgeUv.x + 0.5), coinEdgeV);
+vec2 coinEdgeDx = dFdx(coinEdgeUv), coinEdgeDy = dFdy(coinEdgeUv);
+vec2 coinEdgeDxB = dFdx(coinEdgeUvB), coinEdgeDyB = dFdy(coinEdgeUvB);
+bool coinUseB = dot(coinEdgeDxB, coinEdgeDxB) + dot(coinEdgeDyB, coinEdgeDyB) < dot(coinEdgeDx, coinEdgeDx) + dot(coinEdgeDy, coinEdgeDy);
+vec4 coinEdgeS = coinDecodeSurface(textureGrad(uCoinEdgeMap, coinEdgeUv, coinUseB ? coinEdgeDxB : coinEdgeDx, coinUseB ? coinEdgeDyB : coinEdgeDy));
+vec4 coinSurface = coinFace * coinOnFace + coinEdgeS * coinOnEdge;
 float coinScratch = uCoinScratches * coinSurface.z;
 float coinPit = uCoinPits * coinSurface.w;
 
@@ -249,6 +284,7 @@ float coinSlopeU = coinSurface.x + (coinSwell(coinP + coinAcrossObject * 0.004) 
 float coinSlopeV = coinSurface.y + (coinSwell(coinP + coinAlongObject * 0.004) - coinH0) / 0.004;
 vec3 coinU = normalize(mix(vCoinX, -vCoinTangent, coinSideness));
 vec3 coinV = normalize(mix(vCoinZ, vCoinAxis, coinSideness));
+float coinFootprint = length(fwidth(coinP));
 
 vec3 coinBase = uCoinGold;
 // Old gold is not one yellow. The recesses run warmer and deeper — the toning
@@ -256,19 +292,20 @@ vec3 coinBase = uCoinGold;
 coinBase *= mix(vec3(1.0), vec3(0.88, 0.72, 0.5), 0.55 * coinCavity);
 // Dull metal is a shade darker and greyer than the polished: its surface is
 // scattering rather than reflecting, and gold's colour is in its reflection.
-coinBase = mix(coinBase, coinBase * vec3(0.62, 0.66, 0.72), 0.45 * coinDull);
+coinBase = mix(coinBase, coinBase * vec3(0.62, 0.66, 0.72), 0.3 * coinDull);
 coinBase = mix(coinBase, uCoinPatinaColor, 0.75 * coinPatina);
 coinBase = mix(coinBase, uCoinGrimeColor, coinGrime);
-// The floor of a dent has lost its polish, and a scratch shows fresher metal.
+// The floor of a dent has lost its polish, and the dirt of a lifetime has
+// settled into every scratch.
 coinBase *= 1.0 - 0.35 * coinPit;
-coinBase *= 1.0 + 0.05 * coinScratch;
+coinBase *= 1.0 - 0.12 * coinScratch;
 // The rubbed high points are a shade brighter than the rest, and the field is
 // toned below them. Measured in the probe, a field left as bright as the relief
 // came out at 180 to the relief's 137 out of 255, since its rougher metal
 // gathers more of the softbox than the polished high points do — the coin
 // inside out. This puts the clean field below the relief and the grime below that.
 coinBase *= 1.0 + 0.12 * coinExposed;
-coinBase *= 1.0 - 0.4 * coinCavity;
+coinBase *= 1.0 - 0.48 * coinCavity;
 diffuseColor.rgb = coinBase;
 `;
 
@@ -277,12 +314,15 @@ const COIN_FRAGMENT_ROUGHNESS = /* glsl */ `
 // wear map; the high points shifted toward the polished end. Then a scratch is
 // rougher along its floor, a dent rougher still, patina is a soft film, and
 // grime is not metal at all.
-roughnessFactor = mix(uCoinPolish, 0.78, coinDull);
+roughnessFactor = mix(uCoinPolish, 0.85, coinDull);
 roughnessFactor = mix(roughnessFactor, uCoinPolish, 0.45 * coinExposed * (1.0 - coinDull));
-roughnessFactor += 0.28 * coinScratch + 0.3 * coinPit + 0.14 * coinPatina;
-// And a mottle finer than the wear map, so the sheen never runs smooth for
-// long: a rubbed patch is rubbed unevenly.
-roughnessFactor += 0.09 * (coinFbm(coinP * 22.0 + vec3(7.0, 5.0, 3.0)) - 0.5);
+roughnessFactor += 0.16 * coinScratch + 0.3 * coinPit + 0.16 * coinPatina;
+// And mottle finer than the wear map, down to the pixel, so the sheen never
+// runs smooth for long: a rubbed patch is rubbed unevenly.
+// Less of it on the edge, which is rubbed evenly by everything it rolls on;
+// and the edge is lit flat by the room, where a tenth of roughness is a big
+// step in brightness and the mottle drew as camouflage.
+roughnessFactor += coinRoughnessDetail(coinP, coinFootprint) * (1.0 - 0.6 * coinSideness);
 roughnessFactor = mix(roughnessFactor, 0.85, coinGrime);
 // Never a true mirror. Below about 0.25 the domed edges of the relief, which
 // face every direction, find the exact mirror angle of the spotlight somewhere
@@ -331,10 +371,11 @@ reflectedLight.indirectSpecular *= coinOcclusion;
 `;
 
 /**
- * `halfThickness` is what the edge strip's y spans; the asset build bakes it to
- * the coin's inradius.
+ * `halfThickness` is what the edge strip's y spans and `radius` where the edge
+ * is; the asset build bakes the strip to the coin's inradius and its face
+ * extent.
  */
-export function createCoinMaterial(settings?: Partial<CoinSettings>, halfThickness = 0.1): CoinMaterial {
+export function createCoinMaterial(settings?: Partial<CoinSettings>, halfThickness = 0.1, radius = 0.63): CoinMaterial {
   const coin: CoinSettings = { ...DEFAULT_COIN, ...settings };
   // Clean until the map arrives: a single texel as far from any wall as the map
   // can say.
@@ -347,6 +388,7 @@ export function createCoinMaterial(settings?: Partial<CoinSettings>, halfThickne
     uCoinSurfaceMap: { value: flat as THREE.Texture },
     uCoinEdgeMap: { value: flat as THREE.Texture },
     uCoinHalfThickness: { value: halfThickness },
+    uCoinRadius: { value: radius },
     uCoinGrime: { value: coin.grime },
     uCoinPolish: { value: coin.polish },
     uCoinWearAmount: { value: coin.wear },
@@ -357,7 +399,7 @@ export function createCoinMaterial(settings?: Partial<CoinSettings>, halfThickne
     // about this, and it is the colour the metal actually is rather than a tint.
     uCoinGold: { value: new THREE.Color(1.0, 0.76, 0.34) },
     uCoinGrimeColor: { value: new THREE.Color(0.05, 0.035, 0.02) },
-    uCoinPatinaColor: { value: new THREE.Color(0.34, 0.16, 0.06) },
+    uCoinPatinaColor: { value: new THREE.Color(0.3, 0.14, 0.05) },
   };
 
   const material = new THREE.MeshPhysicalMaterial({
