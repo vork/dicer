@@ -39,6 +39,19 @@ const DIE_ORDER = ['d4', 'd6', 'd8', 'd10', 'd12', 'd20'];
 const TARGET_D20_WIDTH = 1.0;
 
 const HUMAN_SET_NAMES = {};
+// The coin is struck from a different metal for each colourway, so the one
+// row of swatches dresses the whole pool. Gold on the first, which is the
+// default; the rest paired to the dice by feel — verdigris bronze with the
+// green set, copper with the orange, iron with the grey.
+const SET_METALS = {
+  set1: 'gold',
+  set2: 'bronze',
+  set3: 'silver',
+  set4: 'roseGold',
+  set5: 'iron',
+  set6: 'electrum',
+  set7: 'copper',
+};
 
 /**
  * Reads a binary STL as a flat, unindexed triangle list. STL normals are advisory
@@ -591,6 +604,7 @@ async function main() {
       id,
       name: HUMAN_SET_NAMES[id] || `Set ${i + 1}`,
       swatch,
+      metal: SET_METALS[id] || 'gold',
       baseColor: `sets/${baseColorFile}`,
       roughness: `sets/${roughnessFile}`,
       normal: `sets/${normalFile}`,

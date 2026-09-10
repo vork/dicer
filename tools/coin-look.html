@@ -44,6 +44,7 @@
       const assets = await loadDiceAssets();
       const coin = createCoinMaterial(JSON.parse(params.get('coin') || '{}'), assets.info.coin.inradius, assets.info.coin.faces[0].extent);
       coin.material.envMap = createEnvironment(renderer, true);
+      if (params.get('metal')) coin.setMetal(params.get('metal'));
       if (params.get('env')) coin.material.envMapIntensity = Number(params.get('env'));
       await coin.ready;
       if (debug) {

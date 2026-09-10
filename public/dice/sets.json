@@ -3,6 +3,7 @@
     "id": "set1",
     "name": "Set 1",
     "swatch": "#2f516a",
+    "metal": "gold",
     "baseColor": "sets/set1-basecolor.webp",
     "roughness": "sets/set1-roughness.webp",
     "normal": "sets/normal-ae5af37a.webp"
@@ -11,6 +12,7 @@
     "id": "set2",
     "name": "Set 2",
     "swatch": "#267152",
+    "metal": "bronze",
     "baseColor": "sets/set2-basecolor.webp",
     "roughness": "sets/set2-roughness.webp",
     "normal": "sets/normal-ae5af37a.webp"
@@ -19,6 +21,7 @@
     "id": "set3",
     "name": "Set 3",
     "swatch": "#796190",
+    "metal": "silver",
     "baseColor": "sets/set3-basecolor.webp",
     "roughness": "sets/set3-roughness.webp",
     "normal": "sets/normal-1ba2bf0c.webp"
@@ -27,6 +30,7 @@
     "id": "set4",
     "name": "Set 4",
     "swatch": "#923151",
+    "metal": "roseGold",
     "baseColor": "sets/set4-basecolor.webp",
     "roughness": "sets/set4-roughness.webp",
     "normal": "sets/normal-bcb90484.webp"
@@ -35,6 +39,7 @@
     "id": "set5",
     "name": "Set 5",
     "swatch": "#5c5a5d",
+    "metal": "iron",
     "baseColor": "sets/set5-basecolor.webp",
     "roughness": "sets/set5-roughness.webp",
     "normal": "sets/normal-bd379a8e.webp"
@@ -43,6 +48,7 @@
     "id": "set6",
     "name": "Set 6",
     "swatch": "#333a76",
+    "metal": "electrum",
     "baseColor": "sets/set6-basecolor.webp",
     "roughness": "sets/set6-roughness.webp",
     "normal": "sets/normal-d10351dd.webp"
@@ -51,6 +57,7 @@
     "id": "set7",
     "name": "Set 7",
     "swatch": "#e9842c",
+    "metal": "copper",
     "baseColor": "sets/set7-basecolor.webp",
     "roughness": "sets/set7-roughness.webp",
     "normal": "sets/normal-ae5af37a.webp"

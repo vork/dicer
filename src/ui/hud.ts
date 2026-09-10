@@ -1,3 +1,4 @@
+import { COIN_METALS } from '../scene/coin-material';
 import type { DiceSet } from '../assets';
 import { DIE_TYPES, faceLabel, type DieType } from '../dice/values';
 import { RESULT_MODES, type Outcome, type ResultMode, type Roll } from '../dice/outcome';
@@ -110,9 +111,12 @@ export class Hud {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'swatch' + (set.id === activeId ? ' active' : '');
-      button.style.background = set.swatch;
-      button.title = set.name;
-      button.setAttribute('aria-label', set.name);
+      // The dice colour around a dot of the coin's metal: one swatch dresses
+      // the whole pool.
+      const metal = COIN_METALS[set.metal] ?? COIN_METALS.gold;
+      button.style.background = `radial-gradient(circle at 50% 50%, ${metal.swatch} 0 30%, ${set.swatch} 38%)`;
+      button.title = `${set.name}, ${metal.name} coin`;
+      button.setAttribute('aria-label', `${set.name}, ${metal.name} coin`);
       button.addEventListener('click', () => {
         this.swatches.querySelectorAll('.swatch').forEach((el) => el.classList.remove('active'));
         button.classList.add('active');

@@ -19,6 +19,13 @@ pool sits over the die picker with Roll beside it, on a phone every row takes th
 full width, the seven die buttons share it as equal cells with the count as a
 corner badge, and Roll drops to the bottom under the thumb.
 
+The colour swatches dress the whole pool: each colourway pairs the dice with a
+metal for the coin — gold, verdigris bronze, silver, rose gold, iron, electrum,
+copper — shown as the dot in the middle of the swatch. A metal is a reflectance,
+the colour it actually is in linear light, with the film it takes on with age
+and the dirt that settles on it: silver tarnishes brown going on black, bronze
+goes green, iron rusts, gold barely tones at all.
+
 **Sum / Highest / Lowest** decides how the pool collapses into the one number that
 gets flashed. Highest and lowest are advantage and disadvantage: the dice that did
 not count stay in the breakdown, dimmed and struck through, and a natural 20 or 1
@@ -1253,7 +1260,7 @@ pose, not the antialiasing.
 | `npm run verify:pwa` | rebuilds, then boots the installed app with the network cut |
 | `npm run calibrate` | regenerate the face contact sheets |
 | `npm run coin:faces` | contact sheet of the coin's two faces, and its normals with `--normals` |
-| `npm run coin:look` | the coin under the app's lighting in seconds, any shader channel with `--debug` |
+| `npm run coin:look` | the coin under the app's lighting in seconds, any shader channel with `--debug`, any metal with `--metal` |
 | `npm run flakes` | contact sheet of flake settings on one settled die |
 | `npm run tonemap` | the same settled pool through each tone mapping operator, exposure-matched |
 | `python3 tools/tonemap-curves.py` | what each operator does to a tinted highlight, exactly |

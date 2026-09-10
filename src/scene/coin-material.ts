@@ -61,16 +61,109 @@ export interface CoinSettings {
 
 export const DEFAULT_COIN: CoinSettings = {
   grime: 1.0,
-  // The floor of the roughness; the shader will not go below 0.25 anyway.
-  polish: 0.25,
+  // The floor of the roughness, or the metal's own floor if that is higher.
+  polish: 0.2,
   wear: 0.9,
   scratches: 0.6,
   patina: 1.0,
   pits: 0.6,
 };
 
+/**
+ * What the coin is struck from. Each metal is a reflectance — the colour a
+ * metal actually is, in linear light, which is the colour of its reflection —
+ * with the film it takes on with age and the dirt that settles on it, since a
+ * silver coin tarnishes black where a bronze one goes green and gold barely
+ * tones at all. `swatch` is the metal as a paint colour for the picker.
+ */
+export type CoinMetal = 'gold' | 'silver' | 'bronze' | 'copper' | 'iron' | 'electrum' | 'roseGold';
+
+export interface CoinMetalLook {
+  name: string;
+  swatch: string;
+  base: [number, number, number];
+  patina: [number, number, number];
+  /** How readily it takes the film, as a multiplier on the patina setting. */
+  patinaAmount: number;
+  grime: [number, number, number];
+  /** The floor of its roughness: how far its rubbed high points go toward a mirror. */
+  polish: number;
+}
+
+export const COIN_METALS: Record<CoinMetal, CoinMetalLook> = {
+  gold: {
+    name: 'gold',
+    swatch: '#d9a83f',
+    base: [1.0, 0.76, 0.34],
+    patina: [0.3, 0.14, 0.05],
+    patinaAmount: 1,
+    grime: [0.05, 0.035, 0.02],
+    polish: 0.25,
+  },
+  silver: {
+    name: 'silver',
+    swatch: '#c9cbd0',
+    base: [0.95, 0.94, 0.9],
+    // Silver tarnishes to sulphide: brown going on black, never green.
+    patina: [0.12, 0.1, 0.09],
+    patinaAmount: 0.8,
+    grime: [0.03, 0.03, 0.03],
+    polish: 0.22,
+  },
+  bronze: {
+    name: 'bronze',
+    swatch: '#8a6a3c',
+    base: [0.62, 0.45, 0.3],
+    // Verdigris.
+    patina: [0.14, 0.4, 0.3],
+    patinaAmount: 1.4,
+    grime: [0.03, 0.05, 0.04],
+    polish: 0.3,
+  },
+  copper: {
+    name: 'copper',
+    swatch: '#c2704b',
+    base: [0.95, 0.64, 0.54],
+    patina: [0.2, 0.13, 0.09],
+    patinaAmount: 1.2,
+    grime: [0.05, 0.035, 0.025],
+    polish: 0.26,
+  },
+  iron: {
+    name: 'iron',
+    swatch: '#5e5d5c',
+    base: [0.56, 0.57, 0.58],
+    // Rust.
+    patina: [0.34, 0.15, 0.06],
+    patinaAmount: 1.3,
+    grime: [0.04, 0.035, 0.03],
+    polish: 0.4,
+  },
+  electrum: {
+    name: 'electrum',
+    swatch: '#d8c47a',
+    base: [0.92, 0.84, 0.58],
+    patina: [0.28, 0.2, 0.09],
+    patinaAmount: 0.9,
+    grime: [0.05, 0.04, 0.025],
+    polish: 0.25,
+  },
+  roseGold: {
+    name: 'rose gold',
+    swatch: '#c98a74',
+    base: [0.9, 0.62, 0.52],
+    patina: [0.3, 0.15, 0.11],
+    patinaAmount: 0.8,
+    grime: [0.05, 0.035, 0.025],
+    polish: 0.24,
+  },
+};
+
 export interface CoinMaterial {
   material: THREE.MeshPhysicalMaterial;
+  /** Strikes the coin from another metal. Instant: colours and a roughness floor. */
+  setMetal(metal: CoinMetal): void;
+  getMetal(): CoinMetal;
   /** Resolves once the baked wear map is in; until then the field is clean. */
   ready: Promise<void>;
   setCoin(settings: Partial<CoinSettings>): void;
@@ -324,11 +417,12 @@ roughnessFactor += 0.16 * coinScratch + 0.3 * coinPit + 0.16 * coinPatina;
 // step in brightness and the mottle drew as camouflage.
 roughnessFactor += coinRoughnessDetail(coinP, coinFootprint) * (1.0 - 0.6 * coinSideness);
 roughnessFactor = mix(roughnessFactor, 0.85, coinGrime);
-// Never a true mirror. Below about 0.25 the domed edges of the relief, which
+// Never a true mirror. Much below this the domed edges of the relief, which
 // face every direction, find the exact mirror angle of the spotlight somewhere
 // along their length and return it at hundreds of times the rest of the frame;
-// the bloom pass then spreads that over the whole tray and washes it pale.
-roughnessFactor = clamp(roughnessFactor, 0.25, 0.95);
+// the soft knee on the direct specular below is what really holds that, but
+// the floor keeps the metal reading as metal rather than as chrome.
+roughnessFactor = clamp(roughnessFactor, 0.2, 0.95);
 `;
 
 const COIN_FRAGMENT_METALNESS = /* glsl */ `
@@ -395,12 +489,23 @@ export function createCoinMaterial(settings?: Partial<CoinSettings>, halfThickne
     uCoinScratches: { value: coin.scratches },
     uCoinPatina: { value: coin.patina },
     uCoinPits: { value: coin.pits },
-    // Linear, since it is written straight into the shader: gold's reflectance is
-    // about this, and it is the colour the metal actually is rather than a tint.
-    uCoinGold: { value: new THREE.Color(1.0, 0.76, 0.34) },
-    uCoinGrimeColor: { value: new THREE.Color(0.05, 0.035, 0.02) },
-    uCoinPatinaColor: { value: new THREE.Color(0.3, 0.14, 0.05) },
+    // Linear, since they are written straight into the shader: a metal's
+    // reflectance is the colour it actually is rather than a tint. Set by
+    // setMetal below.
+    uCoinGold: { value: new THREE.Color() },
+    uCoinGrimeColor: { value: new THREE.Color() },
+    uCoinPatinaColor: { value: new THREE.Color() },
   };
+  let metal: CoinMetal = 'gold';
+  const applyMetal = () => {
+    const look = COIN_METALS[metal];
+    uniforms.uCoinGold.value.setRGB(...look.base);
+    uniforms.uCoinGrimeColor.value.setRGB(...look.grime);
+    uniforms.uCoinPatinaColor.value.setRGB(...look.patina);
+    uniforms.uCoinPatina.value = coin.patina * look.patinaAmount;
+    uniforms.uCoinPolish.value = Math.max(coin.polish, look.polish);
+  };
+  applyMetal();
 
   const material = new THREE.MeshPhysicalMaterial({
     color: 0xffffff,
@@ -452,14 +557,18 @@ export function createCoinMaterial(settings?: Partial<CoinSettings>, halfThickne
   return {
     material,
     ready,
+    setMetal(next) {
+      metal = next;
+      applyMetal();
+    },
+    getMetal: () => metal,
     setCoin(next) {
       Object.assign(coin, next);
       uniforms.uCoinGrime.value = coin.grime;
-      uniforms.uCoinPolish.value = coin.polish;
       uniforms.uCoinWearAmount.value = coin.wear;
       uniforms.uCoinScratches.value = coin.scratches;
-      uniforms.uCoinPatina.value = coin.patina;
       uniforms.uCoinPits.value = coin.pits;
+      applyMetal();
     },
     getCoin: () => ({ ...coin }),
   };

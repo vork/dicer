@@ -4,6 +4,7 @@
  *   npm run coin:look                       -> .calibration/coin-look.png
  *   npm run coin:look -- --tails
  *   npm run coin:look -- --debug coinGrime  (any expression in the coin's fragment shader)
+ *   npm run coin:look -- --metal silver
  *   npm run coin:look -- --coin '{"polish":0.3}' --env 0.8 --elev 40 --dist 2.6 --yaw 2.2
  *
  * Each option becomes a query parameter of coin-look.html. Also prints the mean
@@ -21,7 +22,7 @@ const option = (name) => {
   return i === -1 ? null : args[i + 1] ?? 'true';
 };
 const query = new URLSearchParams();
-for (const name of ['debug', 'coin', 'env', 'elev', 'dist', 'yaw', 'size']) {
+for (const name of ['debug', 'coin', 'metal', 'env', 'elev', 'dist', 'yaw', 'size']) {
   const value = option(name);
   if (value !== null) query.set(name, value);
 }

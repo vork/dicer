@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { DIE_TYPES, type DieType } from './dice/values';
+import type { CoinMetal } from './scene/coin-material';
 
 export interface FaceInfo {
   /** Outward unit normal in the die's local space. */
@@ -23,6 +24,8 @@ export interface DiceSet {
   id: string;
   name: string;
   swatch: string;
+  /** What the coin is struck from when this colourway is chosen. */
+  metal: CoinMetal;
   baseColor: string;
   roughness: string;
   normal: string;
