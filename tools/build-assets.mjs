@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import sharp from 'sharp';
-import { bakeEdge, bakeFace, distanceTransform, rasteriseRaised } from './coin-surface.mjs';
+import { MICRO_TILES_AROUND, bakeEdge, bakeFace, bakeMicro, distanceTransform, rasteriseRaised } from './coin-surface.mjs';
 import { readGlb, readAccessor, readImage, matrixScale, writeGlb } from './glb.mjs';
 
 const SOURCE = process.argv[2] || '/root/.claude/uploads/80492aad-1b8b-5ad8-b105-0b761a0e5602/7bfb6e53-rpg_dice_set_1.glb';
@@ -527,6 +527,14 @@ async function main() {
     })
       .webp({ lossless: true })
       .toFile(path.join(OUT_DIR, 'coin-edge.webp'));
+    // The micro tile: sized so a whole number of them go around the edge.
+    const MICRO_SIZE = 256;
+    const microTile = (2 * Math.PI * rim) / MICRO_TILES_AROUND;
+    await sharp(bakeMicro({ size: MICRO_SIZE, tile: microTile, seed: 21 }), { raw: { width: MICRO_SIZE, height: MICRO_SIZE, channels: 4 } })
+      .webp({ lossless: true })
+      .toFile(path.join(OUT_DIR, 'coin-micro.webp'));
+    // One unit is 20mm, so this is real micrometres.
+    console.log(`coin micro tile: ${microTile.toFixed(4)} units, ${((microTile / MICRO_SIZE) * 20000).toFixed(1)} µm per texel`);
 
     // Reads from the two flat faces only. The collider is a cylinder rather than
     // the hull, so the physics never sees the relief; the hull here is a ring for

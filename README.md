@@ -498,6 +498,14 @@ to it since it was struck, and all of that follows the shape:
   channels and roughen and darken their floors.
 - Old gold is not one yellow: the recesses run warmer and deeper, the rubbed
   metal paler, and the whole field sees less of the room than the high points.
+- Under everything, a micro tile: a 256-texel seamless square of the
+  imperfections too fine for the surface map — hairline micro-scratches, the
+  metal's grain, pinpoint pores, the faint peel of the struck surface, at about
+  nine micrometres a texel — repeated thirty-four times around the coin and as
+  many across it, so it wraps the edge exactly. Its slopes add to the surface
+  map's along the same tangents, and its marks add to the roughness. Mipmapped,
+  it is real texture when the coin fills the screen and a soft matte, never a
+  shimmer, when it does not. The `micro` setting scales it.
 - The roughness is detailed down to the pixel: under the wear map, four octaves
   of mottle and a scatter of dull specks, each octave faded out as its
   wavelength closes on the size of a pixel — the fragment's footprint in the

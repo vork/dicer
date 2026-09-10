@@ -26,10 +26,25 @@
  *
  * The scratch and dent masks ride in the blue and (inverted) alpha channels
  * for the shader's roughness and colour.
+ *
+ * And under all of that a micro tile (bakeMicro): a small seamless square of
+ * the imperfections too fine for the surface map — hairline micro-scratches,
+ * the metal's grain, pinpoint pores, the faint peel of the struck surface —
+ * repeated many times across the coin. Mipmapped, it is real texture when the
+ * coin fills the screen and fades to a soft matte, never a shimmer, when it
+ * does not.
  */
 
 /** Slopes are stored as a fraction of this; 1.5 is a 56 degree wall. */
 export const SLOPE_MAX = 1.5;
+/** The micro tile's slopes are gentler, so they get a finer scale. */
+export const MICRO_SLOPE_MAX = 0.5;
+/**
+ * How many micro tiles go around the coin's edge; the tile's size in coin
+ * units follows from the radius, so the strip wraps without a seam. The shader
+ * carries the same number.
+ */
+export const MICRO_TILES_AROUND = 34;
 
 function mulberry32(seed) {
   let a = seed >>> 0;
@@ -422,4 +437,102 @@ export function bakeEdge({ width, height: rows, rim, top, seed }) {
   }
 
   return encode(height, scratches, dents, width, rows, texelU, texelV, true);
+}
+
+/** Periodic 2D value noise over a lattice of `period` cells, for a tile that wraps. */
+function periodicNoise(x, y, period, seed) {
+  const ix = Math.floor(x), iy = Math.floor(y);
+  const fx = smooth(x - ix), fy = smooth(y - iy);
+  const at = (i, j) => hash3(((i % period) + period) % period, ((j % period) + period) % period, seed);
+  return lerp(lerp(at(ix, iy), at(ix + 1, iy), fx), lerp(at(ix, iy + 1), at(ix + 1, iy + 1), fx), fy);
+}
+
+/** Stamps into a tile that wraps in both directions. */
+function stampWrapped(height, mask, maskWeight, size, cx, cy, reach, profileAt) {
+  for (let py = Math.floor(cy - reach); py <= Math.ceil(cy + reach); py++) {
+    for (let px = Math.floor(cx - reach); px <= Math.ceil(cx + reach); px++) {
+      const { depth, weight } = profileAt(px, py);
+      if (depth <= 0) continue;
+      const i = (((py % size) + size) % size) * size + (((px % size) + size) % size);
+      height[i] -= depth;
+      mask[i] = Math.max(mask[i], maskWeight * weight);
+    }
+  }
+}
+
+/**
+ * The micro tile: `size` texels square, covering `tile` coin units, seamless.
+ * Heights are tiny — the whole tile is a couple of millimetres across.
+ */
+export function bakeMicro({ size, tile, seed }) {
+  const texel = tile / size;
+  const height = new Float64Array(size * size);
+  const scratches = new Float64Array(size * size);
+  const pores = new Float64Array(size * size);
+  const random = mulberry32(seed);
+
+  // Grain and peel, periodic so the tile joins itself.
+  for (let py = 0; py < size; py++) {
+    for (let px = 0; px < size; px++) {
+      const u = px / size, v = py / size;
+      let h = 0;
+      // Peel: a slow undulation, a couple of cells per tile.
+      h += 0.0005 * (periodicNoise(u * 3, v * 3, 3, seed) - 0.5);
+      // Grain, three octaves.
+      h += 0.0003 * (periodicNoise(u * 9, v * 9, 9, seed + 1) - 0.5);
+      h += 0.00018 * (periodicNoise(u * 21, v * 21, 21, seed + 2) - 0.5);
+      h += 0.0001 * (periodicNoise(u * 47, v * 47, 47, seed + 3) - 0.5);
+      height[py * size + px] = h;
+    }
+  }
+
+  // Micro-scratches: short, a texel or two wide, barely deep.
+  for (let n = 0; n < 140; n++) {
+    const ax = random() * size, ay = random() * size;
+    const direction = random() * Math.PI * 2;
+    const length = (4 + random() ** 2 * 60);
+    const bx = ax + Math.cos(direction) * length, by = ay + Math.sin(direction) * length;
+    const halfWidth = 0.8 + random() * 1.4;
+    const depth = 0.00008 + random() ** 2 * 0.00025;
+    const dx = bx - ax, dy = by - ay;
+    const len2 = dx * dx + dy * dy || 1;
+    const reach = Math.hypot(dx, dy) + halfWidth + 1;
+    stampWrapped(height, scratches, 0.6, size, (ax + bx) / 2, (ay + by) / 2, reach / 2 + halfWidth + 1, (px, py) => {
+      let t = ((px - ax) * dx + (py - ay) * dy) / len2;
+      t = Math.max(0, Math.min(1, t));
+      const d = Math.hypot(px - (ax + t * dx), py - (ay + t * dy)) / halfWidth;
+      if (d >= 1) return { depth: 0, weight: 0 };
+      const profile = 1 - d * d;
+      return { depth: depth * profile, weight: profile };
+    });
+  }
+  // Pores.
+  for (let n = 0; n < 90; n++) {
+    const cx = random() * size, cy = random() * size;
+    const radius = 1 + random() ** 2 * 3.5;
+    const depth = 0.0001 + random() * 0.0003;
+    stampWrapped(height, pores, 1, size, cx, cy, radius + 1, (px, py) => {
+      const d = Math.hypot(px - cx, py - cy) / radius;
+      if (d >= 1) return { depth: 0, weight: 0 };
+      const profile = (1 - d * d) * (1 - d * d);
+      return { depth: depth * profile, weight: profile };
+    });
+  }
+
+  // Slopes by central difference, wrapping both ways.
+  const out = Buffer.alloc(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    const y0 = (y - 1 + size) % size, y1 = (y + 1) % size;
+    for (let x = 0; x < size; x++) {
+      const x0 = (x - 1 + size) % size, x1 = (x + 1) % size;
+      const su = (height[y * size + x1] - height[y * size + x0]) / (2 * texel);
+      const sv = (height[y1 * size + x] - height[y0 * size + x]) / (2 * texel);
+      const i = (y * size + x) * 4;
+      out[i] = Math.round(128 + 127 * Math.max(-1, Math.min(1, su / MICRO_SLOPE_MAX)));
+      out[i + 1] = Math.round(128 + 127 * Math.max(-1, Math.min(1, sv / MICRO_SLOPE_MAX)));
+      out[i + 2] = Math.round(255 * Math.min(1, scratches[y * size + x]));
+      out[i + 3] = 255 - Math.round(254 * Math.min(1, pores[y * size + x]));
+    }
+  }
+  return out;
 }

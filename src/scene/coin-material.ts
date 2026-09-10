@@ -25,9 +25,13 @@ import * as THREE from 'three';
  *   pores. The map stores slopes rather than normals, so one map serves the
  *   faces sampled by x and z and, as a strip, the edge sampled by angle and y;
  *   the shader tilts the geometric normal by the slopes along the matching
- *   tangents. The strike's slow swell and the fine grain of the metal are
- *   computed here, as height differences, since baked they cost more bytes than
- *   the rest of the map together.
+ *   tangents. The strike's slow swell is computed here, as height differences,
+ *   since baked it cost more bytes than the rest of the map together.
+ * - And under everything a micro tile: a small seamless square of the
+ *   imperfections too fine for the surface map — hairline micro-scratches, the
+ *   metal's grain, pinpoint pores, the faint peel of the struck surface —
+ *   repeated thirty-four times around the coin and as many across it, so it
+ *   wraps the edge exactly.
  *
  * Almost none of it is a texture. The asset pipeline stores how deep into a recess
  * each vertex sits in the UV slot (the coin has no texture to put there), bakes
@@ -38,8 +42,8 @@ import * as THREE from 'three';
  *
  * None of it glitters. The slope map is mipmapped, and slopes average correctly
  * under filtering, so a scratch that is narrower than a pixel fades to a faint
- * tilt rather than flickering; the procedural grain is kept coarser than a pixel
- * at the reveal's framing. A pattern finer than a pixel does not draw as a
+ * tilt rather than flickering, and the micro tile, finer than any pixel at the
+ * reveal's framing, fades the same way to a soft matte. A pattern finer than a pixel does not draw as a
  * pattern; it draws as sparkle that crawls when the camera moves, and the first
  * version of this coin did exactly that.
  */
@@ -57,6 +61,8 @@ export interface CoinSettings {
   patina: number;
   /** How much the dents, nicks and pores roughen and darken the metal. */
   pits: number;
+  /** The micro tile's strength: the grain, micro-scratches and pores under everything. */
+  micro: number;
 }
 
 export const DEFAULT_COIN: CoinSettings = {
@@ -67,6 +73,7 @@ export const DEFAULT_COIN: CoinSettings = {
   scratches: 0.6,
   patina: 1.0,
   pits: 0.6,
+  micro: 1.0,
 };
 
 /**
@@ -179,6 +186,10 @@ const COIN_WEAR_EXTENT = 0.7;
 const COIN_WEAR_RANGE = 0.25;
 /** Slopes in the surface maps are stored as a fraction of this; see coin-surface.mjs. */
 const COIN_SLOPE_MAX = 1.5;
+/** And the micro tile's, which are gentler. */
+const COIN_MICRO_SLOPE_MAX = 0.5;
+/** Micro tiles around the edge; the tile's size follows from the radius. Matches the bake. */
+const COIN_MICRO_TILES_AROUND = 34;
 
 const COIN_VERTEX_PARS = /* glsl */ `
 varying vec3 vCoinPosition;
@@ -207,6 +218,7 @@ const COIN_FRAGMENT_PARS = /* glsl */ `
 #define COIN_WEAR_EXTENT ${COIN_WEAR_EXTENT.toFixed(3)}
 #define COIN_WEAR_RANGE ${COIN_WEAR_RANGE.toFixed(3)}
 #define COIN_SLOPE_MAX ${COIN_SLOPE_MAX.toFixed(3)}
+#define COIN_MICRO_SLOPE_MAX ${COIN_MICRO_SLOPE_MAX.toFixed(3)}
 varying vec3 vCoinPosition;
 varying vec2 vCoinUv;
 varying vec3 vCoinRadial;
@@ -220,8 +232,10 @@ uniform float uCoinWearAmount;
 uniform float uCoinScratches;
 uniform float uCoinPatina;
 uniform float uCoinPits;
+uniform float uCoinMicro;
 uniform float uCoinHalfThickness;
 uniform float uCoinRadius;
+uniform float uCoinMicroTile;
 uniform vec3 uCoinGold;
 uniform vec3 uCoinGrimeColor;
 uniform vec3 uCoinPatinaColor;
@@ -233,6 +247,10 @@ uniform sampler2D uCoinWearMap;
 // (inverted). And the edge's, around the circumference by y across it.
 uniform sampler2D uCoinSurfaceMap;
 uniform sampler2D uCoinEdgeMap;
+// The micro tile, repeated: slopes in r and g, micro-scratches in b, pores in
+// a (inverted). Read by the same coordinates as the maps above, at a scale of
+// one tile per uCoinMicroTile units, so it wraps around the edge exactly.
+uniform sampler2D uCoinMicroMap;
 
 float coinHash(vec3 p) {
   p = fract(p * 0.3183099 + 0.1);
@@ -266,11 +284,12 @@ float coinFbm(vec3 p) {
 // at the point and a small step along two tangents, the differences tilt the
 // normal. Sampled in the coin's own space so it turns with the metal.
 float coinSwell(vec3 p) {
-  return 0.004 * (coinFbm(p * 3.0 + vec3(4.0, 1.0, 7.0)) - 0.5)
-    // Grain: enough that no patch of the metal is a perfect mirror. A perfect
-    // mirror reflects the room as the room, and reads as chrome plating.
-    + 0.0009 * (coinNoise(p * 38.0 + vec3(9.0, 3.0, 2.0)) - 0.5)
-    + 0.0004 * (coinNoise(p * 90.0 + vec3(1.0, 8.0, 5.0)) - 0.5);
+  return 0.004 * (coinFbm(p * 3.0 + vec3(4.0, 1.0, 7.0)) - 0.5);
+}
+
+// The micro tile's four channels, decoded the same way as the surface map's.
+vec4 coinDecodeMicro(vec4 texel) {
+  return vec4((texel.rg * 2.0 - 1.0) * COIN_MICRO_SLOPE_MAX, texel.b, 1.0 - texel.a);
 }
 
 // Roughness detail, down to the pixel. Four octaves of mottle, each faded out
@@ -365,8 +384,21 @@ vec2 coinEdgeDxB = dFdx(coinEdgeUvB), coinEdgeDyB = dFdy(coinEdgeUvB);
 bool coinUseB = dot(coinEdgeDxB, coinEdgeDxB) + dot(coinEdgeDyB, coinEdgeDyB) < dot(coinEdgeDx, coinEdgeDx) + dot(coinEdgeDy, coinEdgeDy);
 vec4 coinEdgeS = coinDecodeSurface(textureGrad(uCoinEdgeMap, coinEdgeUv, coinUseB ? coinEdgeDxB : coinEdgeDx, coinUseB ? coinEdgeDyB : coinEdgeDy));
 vec4 coinSurface = coinFace * coinOnFace + coinEdgeS * coinOnEdge;
+// Under it all, the micro tile: by x and z on the faces, by the distance
+// around the edge and y on the edge, blended where a wall turns from one to
+// the other. Its wrap needs no care — the tile repeats, so no coordinate
+// jumps.
+vec2 coinMicroFaceUv = coinP.xz / uCoinMicroTile;
+vec2 coinMicroEdgeUv = vec2((coinAngle / (2.0 * PI)) * float(${COIN_MICRO_TILES_AROUND}), coinP.y / uCoinMicroTile);
+vec4 coinMicro = uCoinMicro * mix(
+  coinDecodeMicro(texture2D(uCoinMicroMap, coinMicroFaceUv)),
+  coinDecodeMicro(texture2D(uCoinMicroMap, coinMicroEdgeUv)),
+  coinSideness
+);
+coinSurface += vec4(coinMicro.xy, 0.0, 0.0);
 float coinScratch = uCoinScratches * coinSurface.z;
 float coinPit = uCoinPits * coinSurface.w;
+float coinMicroMark = 0.7 * coinMicro.z + coinMicro.w;
 
 // The swell and grain, as height differences over a fixed step across the
 // surface, in the two directions the map's slopes are read along.
@@ -409,7 +441,7 @@ const COIN_FRAGMENT_ROUGHNESS = /* glsl */ `
 // grime is not metal at all.
 roughnessFactor = mix(uCoinPolish, 0.85, coinDull);
 roughnessFactor = mix(roughnessFactor, uCoinPolish, 0.45 * coinExposed * (1.0 - coinDull));
-roughnessFactor += 0.16 * coinScratch + 0.3 * coinPit + 0.16 * coinPatina;
+roughnessFactor += 0.16 * coinScratch + 0.3 * coinPit + 0.16 * coinPatina + 0.12 * coinMicroMark;
 // And mottle finer than the wear map, down to the pixel, so the sheen never
 // runs smooth for long: a rubbed patch is rubbed unevenly.
 // Less of it on the edge, which is rubbed evenly by everything it rolls on;
@@ -481,8 +513,11 @@ export function createCoinMaterial(settings?: Partial<CoinSettings>, halfThickne
     uCoinWearMap: { value: clean as THREE.Texture },
     uCoinSurfaceMap: { value: flat as THREE.Texture },
     uCoinEdgeMap: { value: flat as THREE.Texture },
+    uCoinMicroMap: { value: flat as THREE.Texture },
     uCoinHalfThickness: { value: halfThickness },
     uCoinRadius: { value: radius },
+    uCoinMicroTile: { value: (2 * Math.PI * radius) / COIN_MICRO_TILES_AROUND },
+    uCoinMicro: { value: coin.micro },
     uCoinGrime: { value: coin.grime },
     uCoinPolish: { value: coin.polish },
     uCoinWearAmount: { value: coin.wear },
@@ -552,6 +587,10 @@ export function createCoinMaterial(settings?: Partial<CoinSettings>, halfThickne
     load('coin-wear.png', THREE.ClampToEdgeWrapping, false).then((t) => void (uniforms.uCoinWearMap.value = t)),
     load('coin-surface.webp', THREE.ClampToEdgeWrapping, true).then((t) => void (uniforms.uCoinSurfaceMap.value = t)),
     load('coin-edge.webp', THREE.RepeatWrapping, true).then((t) => void (uniforms.uCoinEdgeMap.value = t)),
+    load('coin-micro.webp', THREE.RepeatWrapping, true).then((t) => {
+      t.wrapT = THREE.RepeatWrapping;
+      uniforms.uCoinMicroMap.value = t;
+    }),
   ]).then(() => undefined);
 
   return {
@@ -568,6 +607,7 @@ export function createCoinMaterial(settings?: Partial<CoinSettings>, halfThickne
       uniforms.uCoinWearAmount.value = coin.wear;
       uniforms.uCoinScratches.value = coin.scratches;
       uniforms.uCoinPits.value = coin.pits;
+      uniforms.uCoinMicro.value = coin.micro;
       applyMetal();
     },
     getCoin: () => ({ ...coin }),
