@@ -302,9 +302,16 @@ export class Hud {
     this.measureBand();
 
     // Restart the CSS animation from the top.
-    this.reveal.classList.remove('show');
+    this.reveal.classList.remove('show', 'hide');
     void this.reveal.offsetWidth;
     this.reveal.classList.add('show');
+  }
+
+  /** Fades the result out; it stays up until this is called. */
+  hideResult() {
+    if (!this.reveal.classList.contains('show')) return;
+    this.reveal.classList.remove('show');
+    this.reveal.classList.add('hide');
   }
 
   /**
@@ -345,7 +352,7 @@ export class Hud {
     if (rolling) {
       this.hasRolled = true;
       this.hint.classList.add('hidden');
-      this.reveal.classList.remove('show');
+      this.reveal.classList.remove('show', 'hide');
     }
   }
 

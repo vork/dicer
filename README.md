@@ -26,6 +26,10 @@ the colour it actually is in linear light, with the film it takes on with age
 and the dirt that settles on it: silver tarnishes brown going on black, bronze
 goes green, iron rusts, gold barely tones at all.
 
+The result stays up until you put it away — a tap on the tray, Escape, Space or
+Enter — or until the next throw replaces it. The controls come back the moment
+the dice settle, so the next roll never waits on the last one.
+
 **Sum / Highest / Lowest** decides how the pool collapses into the one number that
 gets flashed. Highest and lowest are advantage and disadvantage: the dice that did
 not count stay in the breakdown, dimmed and struck through, and a natural 20 or 1

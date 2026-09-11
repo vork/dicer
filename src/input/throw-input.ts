@@ -5,6 +5,8 @@ export interface ThrowGesture {
   direction: THREE.Vector2;
   /** 0..1, from a tap through to a hard flick. */
   power: number;
+  /** A plain tap, with no flick to it. The app may take it as a dismissal instead. */
+  tap: boolean;
 }
 
 export interface DragState {
@@ -101,11 +103,11 @@ export class ThrowInput {
         away.x * Math.cos(angle) - away.y * Math.sin(angle),
         away.x * Math.sin(angle) + away.y * Math.cos(angle),
       );
-      this.onThrow({ direction: rotated, power: 0.42 + Math.random() * 0.2 });
+      this.onThrow({ direction: rotated, power: 0.42 + Math.random() * 0.2, tap: true });
       return;
     }
 
-    this.onThrow({ direction, power });
+    this.onThrow({ direction, power, tap: false });
   };
 
   private handleCancel = (event: PointerEvent) => {

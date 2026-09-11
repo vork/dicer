@@ -20,6 +20,11 @@ import { resolveRoll, type ResultMode } from './dice/outcome';
  * How long the close-up holds after the dice stop before easing back out. Long
  * enough for the slower dolly to actually arrive before it starts leaving again.
  */
+/**
+ * How long the reveal's camera move is given to settle, for the tools that
+ * time it. The reveal itself no longer times out: the result stays up until it
+ * is dismissed.
+ */
 export const REVEAL_HOLD_SECONDS = 3.2;
 
 async function loadRapier(): Promise<typeof RAPIER> {
@@ -146,10 +151,16 @@ export class App {
     this.hud.buildSwatches(this.assets.sets, this.activeSet.id);
 
     this.input = new ThrowInput(this.canvas, this.director.camera);
-    this.input.onThrow = ({ direction, power }) => {
+    this.input.onThrow = ({ direction, power, tap }) => {
       this.audio.resume();
+      // A tap while the result is up puts it away; a flick throws again.
+      if (tap && this.revealing) {
+        this.dismissReveal();
+        return;
+      }
       this.throwDice(direction, power);
     };
+    window.addEventListener('keydown', this.handleKey);
     this.input.onDragChange = (drag) => this.hud.updateAim(drag);
 
     this.setPool(this.hud.getPool());
@@ -244,14 +255,10 @@ export class App {
 
     if (justSettled) this.onSettled();
 
-    if (this.revealing && !this.revealHeld) {
-      this.revealTimer += delta;
-      if (this.revealTimer > REVEAL_HOLD_SECONDS) {
-        this.revealing = false;
-        this.director.setMode('idle');
-        this.hud.setRolling(false);
-      }
-    }
+    // The result stays up until it is dismissed — a tap, a key, or the next
+    // throw. It used to fade after a few seconds, which was never long enough
+    // to read a breakdown, and gone by the time anyone looked up from the dice.
+    if (this.revealing) this.revealTimer += delta;
 
     // Under highest/lowest the shot tightens onto the dice that won; under sum
     // every die counts, so every die stays in frame.
@@ -266,10 +273,31 @@ export class App {
     this.postFx.render(delta);
   };
 
+  /** Puts the result away and lets the camera drift back. */
+  private dismissReveal() {
+    if (!this.revealing) return;
+    this.revealing = false;
+    this.revealFocus = [];
+    this.revealTimer = 0;
+    this.hud.hideResult();
+    this.director.setMode('idle');
+  }
+
+  private handleKey = (event: KeyboardEvent) => {
+    if (!this.revealing) return;
+    if (event.key === 'Escape' || event.key === ' ' || event.key === 'Enter') {
+      event.preventDefault();
+      this.dismissReveal();
+    }
+  };
+
   private onSettled() {
     const rolls = this.diceWorld.values();
     const outcome = resolveRoll(rolls, this.resultMode);
     this.hud.showResult(rolls, outcome);
+    // The controls come back with the result, since the result now waits for
+    // the player rather than the other way round.
+    this.hud.setRolling(false);
     // The clear strip between the flashed total and the controls is a different
     // shape on every viewport, so let the layout decide where the dice sit.
     const band = this.hud.getSubjectBand();
@@ -320,6 +348,7 @@ export class App {
       setMode: (mode: ResultMode) => {
         this.resultMode = mode;
       },
+      dismissReveal: () => this.dismissReveal(),
       holdReveal: (hold: boolean) => {
         this.revealHeld = hold;
       },
@@ -334,6 +363,7 @@ export class App {
         rolling: this.diceWorld.isRolling,
         settled: this.diceWorld.allSettled,
         revealing: this.revealing,
+        revealHeld: this.revealHeld,
         values: this.diceWorld.values(),
       }),
     };

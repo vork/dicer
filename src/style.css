@@ -101,15 +101,46 @@ body {
   opacity: 0;
 }
 
+/*
+ * Lands, then stays. It used to fade itself out at the end of the entry
+ * animation; now it holds at full until the player puts it away, which fades
+ * it through reveal-out.
+ */
 .reveal.show {
   animation: reveal-in 2600ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.reveal.hide {
+  animation: reveal-out 480ms ease forwards;
 }
 
 @keyframes reveal-in {
   0% { opacity: 0; transform: scale(1.5); filter: blur(14px); }
   9% { opacity: 1; transform: scale(1); filter: blur(0); }
-  72% { opacity: 1; transform: scale(1); filter: blur(0); }
+  100% { opacity: 1; transform: scale(1); filter: blur(0); }
+}
+
+@keyframes reveal-out {
+  0% { opacity: 1; transform: scale(1); filter: blur(0); }
   100% { opacity: 0; transform: scale(0.97); filter: blur(2px); }
+}
+
+.reveal-dismiss {
+  margin-top: 18px;
+  font-size: 10px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  opacity: 0;
+}
+
+/* Keyed to the parent's show state so it restarts with every result. */
+.reveal.show .reveal-dismiss {
+  animation: dismiss-in 600ms ease 2200ms forwards;
+}
+
+@keyframes dismiss-in {
+  to { opacity: 0.7; }
 }
 
 .reveal-total {
