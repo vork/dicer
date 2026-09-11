@@ -292,6 +292,19 @@ vec4 coinDecodeMicro(vec4 texel) {
   return vec4((texel.rg * 2.0 - 1.0) * COIN_MICRO_SLOPE_MAX, texel.b, 1.0 - texel.a);
 }
 
+// Grunge: the fine, ragged breakup that real dirt and toning have and smooth
+// noise does not. Two octaves of ridged noise — the fold of a value noise
+// about its middle, which puts creases and flecks where a plain noise puts
+// blobs — each faded out as its wavelength closes on a pixel, so it never
+// shimmers. 0.5 is neutral; below it thins a mask, above it thickens.
+float coinGrunge(vec3 p, float footprint) {
+  float fade20 = 1.0 - smoothstep(0.2, 0.6, footprint * 20.0);
+  float fade55 = 1.0 - smoothstep(0.2, 0.6, footprint * 55.0);
+  float ridged20 = 1.0 - abs(2.0 * coinNoise(p * 20.0 + vec3(5.0, 13.0, 2.0)) - 1.0);
+  float ridged55 = 1.0 - abs(2.0 * coinNoise(p * 55.0 + vec3(17.0, 3.0, 8.0)) - 1.0);
+  return 0.5 + 0.4 * (ridged20 - 0.5) * fade20 + 0.35 * (ridged55 - 0.5) * fade55;
+}
+
 // Roughness detail, down to the pixel. Four octaves of mottle, each faded out
 // as its wavelength closes on the size of a pixel — the footprint of the
 // fragment in the coin's own space against the octave's frequency — so the
@@ -336,10 +349,14 @@ vec2 coinWearUv = (coinP.xz + COIN_WEAR_EXTENT) / (2.0 * COIN_WEAR_EXTENT);
 vec2 coinWear = texture2D(uCoinWearMap, coinWearUv).rg;
 float coinWallDistance = (coinP.y > 0.0 ? coinWear.r : coinWear.g) * COIN_WEAR_RANGE;
 float coinFoot = 1.0 - smoothstep(0.0, 0.1, coinWallDistance);
+float coinFootprint = length(fwidth(coinP));
+float coinGrungeAmount = coinGrunge(coinP, coinFootprint);
 float coinBlotch = coinFbm(coinP * 9.0 + vec3(3.1, 7.7, 1.3));
+// The grunge eats into the grime's edges and thins it in flecks, so its
+// patches are ragged rather than soft.
 float coinGrime = uCoinGrime * coinCavity
   * (0.4 + 0.6 * coinFoot)
-  * smoothstep(0.42, 0.62, coinBlotch + 0.5 * coinFoot);
+  * smoothstep(0.42, 0.62, coinBlotch + 0.5 * coinFoot + 0.35 * (coinGrungeAmount - 0.5));
 // And the corner where field meets wall is in shadow from every direction at
 // once, whether or not there is dirt in it.
 float coinRecessShade = coinCavity * coinFoot;
@@ -349,7 +366,7 @@ float coinRecessShade = coinCavity * coinFoot;
 // dull struck surface. The high points are rubbed hardest, so they lean bright.
 float coinWearSlow = coinFbm(coinP * 2.4 + vec3(21.0, 4.0, 8.0));
 float coinWearFine = coinFbm(coinP * 13.0 + vec3(2.0, 17.0, 6.0));
-float coinDull = smoothstep(0.12, 0.82, coinWearSlow + 0.35 * (coinWearFine - 0.5) + 0.12 * coinCavity - 0.1 * coinExposed);
+float coinDull = smoothstep(0.12, 0.82, coinWearSlow + 0.35 * (coinWearFine - 0.5) + 0.12 * coinCavity - 0.1 * coinExposed + 0.3 * (coinGrungeAmount - 0.5));
 // The edge is rubbed by everything and polished by nothing. Leaned toward
 // dull, not floored at it: a floor flattened the low end of the map and left
 // the patches above it as a two-tone camouflage around the rim.
@@ -358,8 +375,10 @@ coinDull = mix(0.5, coinDull, uCoinWearAmount);
 
 // Toning: soft patches of reddish-brown film, thickest in the sheltered field.
 float coinPatina = uCoinPatina
-  * smoothstep(0.42, 0.72, coinFbm(coinP * 3.4 + vec3(11.0, 2.0, 5.0)) + 0.15 * coinFoot)
+  * smoothstep(0.42, 0.72, coinFbm(coinP * 3.4 + vec3(11.0, 2.0, 5.0)) + 0.15 * coinFoot + 0.3 * (coinGrungeAmount - 0.5))
   * (0.35 + 0.65 * coinCavity);
+// And flecks of the toning where the grunge creases, on the sheltered field.
+float coinFleck = smoothstep(0.78, 0.9, coinGrungeAmount) * coinCavity;
 
 // The surface. On the faces the map is read by x and z, heads from the left
 // half of the atlas and tails from the right; the coin's edge reads its strip
@@ -413,7 +432,6 @@ float coinSlopeU = coinSurface.x + coinSwellAmount * (coinSwell(coinP + coinAcro
 float coinSlopeV = coinSurface.y + coinSwellAmount * (coinSwell(coinP + coinAlongObject * 0.004) - coinH0) / 0.004;
 vec3 coinU = normalize(mix(vCoinX, -vCoinTangent, coinSideness));
 vec3 coinV = normalize(mix(vCoinZ, vCoinAxis, coinSideness));
-float coinFootprint = length(fwidth(coinP));
 
 vec3 coinBase = uCoinGold;
 // Old gold is not one yellow. The recesses run warmer and deeper — the toning
@@ -423,6 +441,7 @@ coinBase *= mix(vec3(1.0), vec3(0.88, 0.72, 0.5), 0.55 * coinCavity);
 // scattering rather than reflecting, and gold's colour is in its reflection.
 coinBase = mix(coinBase, coinBase * vec3(0.62, 0.66, 0.72), 0.3 * coinDull);
 coinBase = mix(coinBase, uCoinPatinaColor, 0.75 * coinPatina);
+coinBase = mix(coinBase, uCoinPatinaColor * 0.7, 0.5 * coinFleck);
 coinBase = mix(coinBase, uCoinGrimeColor, coinGrime);
 // The floor of a dent has lost its polish, and the dirt of a lifetime has
 // settled into every scratch.
@@ -445,7 +464,7 @@ const COIN_FRAGMENT_ROUGHNESS = /* glsl */ `
 // grime is not metal at all.
 roughnessFactor = mix(uCoinPolish, 0.85, coinDull);
 roughnessFactor = mix(roughnessFactor, uCoinPolish, 0.45 * coinExposed * (1.0 - coinDull));
-roughnessFactor += 0.16 * coinScratch + 0.3 * coinPit + 0.16 * coinPatina + 0.12 * coinMicroMark;
+roughnessFactor += 0.16 * coinScratch + 0.3 * coinPit + 0.16 * coinPatina + 0.12 * coinMicroMark + 0.1 * coinFleck;
 // And mottle finer than the wear map, down to the pixel, so the sheen never
 // runs smooth for long: a rubbed patch is rubbed unevenly.
 // Less of it on the edge, which is rubbed evenly by everything it rolls on;

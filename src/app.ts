@@ -165,8 +165,9 @@ export class App {
 
   private async applySet(set: DiceSet) {
     const request = ++this.setRequest;
-    // The coin changes at once; it has nothing to download.
+    // The coin changes at once; it has nothing to download. Its voice with it.
     this.coin.setMetal(set.metal);
+    this.audio.setCoinMetal(set.metal);
     const maps = await loadSetTextures(set, this.renderer.capabilities.getMaxAnisotropy());
 
     // Two quick taps on the colour swatches race each other, and whichever

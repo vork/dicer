@@ -76,6 +76,29 @@
         for (let i = 0; i < l.length; i++) mono[i] = (l[i] + r[i]) / 2;
         return { rate: RATE, samples: Array.from(mono), contacts: schedule.length };
       };
+      /**
+       * One coin impact per surface, struck from the given metal, rendered
+       * offline: for measuring how the metals differ.
+       */
+      window.__renderCoin = async (metal, seconds = 0.6) => {
+        const ctx = new OfflineAudioContext(2, Math.ceil(RATE * seconds), RATE);
+        Object.defineProperty(ctx, 'state', { get: () => 'running' });
+        let fakeNow = 0;
+        Object.defineProperty(ctx, 'currentTime', { get: () => fakeNow });
+        const audio = new DiceAudio();
+        const Original = window.AudioContext;
+        window.AudioContext = function () { return ctx; };
+        audio.resume();
+        window.AudioContext = Original;
+        audio.setCoinMetal(metal);
+        fakeNow = 0.05;
+        audio.impact(0.8, 0, 'wall', 0.64, 0, true);
+        const buffer = await ctx.startRendering();
+        const l = buffer.getChannelData(0), r = buffer.getChannelData(1);
+        const mono = new Float32Array(l.length);
+        for (let i = 0; i < l.length; i++) mono[i] = (l[i] + r[i]) / 2;
+        return { rate: RATE, samples: Array.from(mono) };
+      };
       document.getElementById('out').textContent = 'ready';
       window.__ready = true;
     </script>

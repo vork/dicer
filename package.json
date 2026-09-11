@@ -34,6 +34,7 @@
     "tonemap": "node tools/tonemap-sheet.mjs",
     "coin:faces": "node tools/coin-faces.mjs",
     "coin:look": "node tools/coin-look.mjs",
+    "coin:voices": "node tools/coin-voices.mjs",
     "face-sheets": "node tools/face-sheets.mjs",
     "shoot": "node tools/shoot.mjs",
     "diagnose": "node tools/diagnose.mjs"

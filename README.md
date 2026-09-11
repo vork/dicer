@@ -506,6 +506,12 @@ to it since it was struck, and all of that follows the shape:
   map's along the same tangents, and its marks add to the roughness. Mipmapped,
   it is real texture when the coin fills the screen and a soft matte, never a
   shimmer, when it does not. The `micro` setting scales it.
+- Grunge breaks all of that up. Two octaves of ridged noise — the fold of a
+  value noise about its middle, which puts creases and flecks where a plain
+  noise puts blobs — eat into the edges of the grime, thin the patina in
+  flecks, and scatter the wear, and where the grunge creases on the sheltered
+  field there are dark flecks of the toning. Each octave fades as its
+  wavelength closes on a pixel, like the roughness detail below.
 - The roughness is detailed down to the pixel: under the wear map, four octaves
   of mottle and a scatter of dull specks, each octave faded out as its
   wavelength closes on the size of a pixel — the fragment's footprint in the
@@ -657,6 +663,24 @@ which at sixteen times would bulldoze the pool. It is thrown with a flip about t
 axis across its heading, sounds like metal — a brighter, longer, higher voice on
 the same impact machinery, with the modes of a struck disc rather than a block —
 and the reveal reads it as Heads or Tails.
+
+Each metal has its own voice on top of that. The coin's voice is gold's; a
+metal scales its pitch, its ring time, the cap on its resonance, its body and
+its tick, and the swatch that changes the metal changes the voice with it. What
+actually sets the ring is the cap on the resonators' Q — at 4 kHz, Q 80 rings for
+15 ms and Q 260 for 50 ms — so silver, the bell among coins, is capped at 260 and
+iron at 30. `npm run coin:voices` renders one impact per metal offline and
+measures them; averaged over six impacts each:
+
+| metal | centroid | ring to −30 dB | tail vs strike |
+| --- | --- | --- | --- |
+| gold | 5.0 kHz | 43 ms | −10.1 dB |
+| silver | 5.9 kHz | 65 ms | −6.2 dB |
+| bronze | 4.6 kHz | 70 ms | −6.8 dB |
+| copper | 4.7 kHz | 35 ms | −8.8 dB |
+| iron | 4.7 kHz | 24 ms | −14.5 dB |
+| electrum | 5.1 kHz | 53 ms | −8.5 dB |
+| rose gold | 4.8 kHz | 33 ms | −10.8 dB |
 
 ## Antialiasing
 
@@ -1292,6 +1316,7 @@ pose, not the antialiasing.
 | `npm run calibrate` | regenerate the face contact sheets |
 | `npm run coin:faces` | contact sheet of the coin's two faces, and its normals with `--normals` |
 | `npm run coin:look` | the coin under the app's lighting in seconds, any shader channel with `--debug`, any metal with `--metal` |
+| `npm run coin:voices` | one coin impact per metal, rendered offline and measured |
 | `npm run flakes` | contact sheet of flake settings on one settled die |
 | `npm run tonemap` | the same settled pool through each tone mapping operator, exposure-matched |
 | `python3 tools/tonemap-curves.py` | what each operator does to a tinted highlight, exactly |

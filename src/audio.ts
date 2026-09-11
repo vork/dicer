@@ -26,6 +26,31 @@ const COIN: Record<ContactSurface, { root: number; decay: number; tick: number; 
 };
 
 /**
+ * What the coin is struck from, as it sounds. The voice above is gold's; each
+ * metal scales it. Silver is the ringing one — a silver coin dropped on stone
+ * is a bell — high, long and narrow. Bronze rings lower and long, the way bell
+ * bronze does. Copper is warm and quickly damped, iron is dull and short and
+ * broad, and gold, soft and dense, sits between: a clink with little sustain.
+ * `pitch` scales the root, `sustain` the ring time, `q` caps the resonance,
+ * `body` scales the low thump and `tick` the contact's top end.
+ */
+export type CoinMetal = 'gold' | 'silver' | 'bronze' | 'copper' | 'iron' | 'electrum' | 'roseGold';
+
+//
+// The Q cap is what actually sets the ring: a resonator at 4kHz rings for
+// 2.303*Q/(pi*f), so Q 80 is 15ms and Q 260 is 50ms. The sustain scale only
+// matters below the cap.
+const COIN_VOICES: Record<CoinMetal, { pitch: number; sustain: number; q: number; body: number; tick: number }> = {
+  gold: { pitch: 1.0, sustain: 1.0, q: 80, body: 1.0, tick: 1.0 },
+  silver: { pitch: 1.18, sustain: 1.8, q: 260, body: 0.7, tick: 1.15 },
+  bronze: { pitch: 0.9, sustain: 1.6, q: 220, body: 0.9, tick: 0.95 },
+  copper: { pitch: 0.84, sustain: 0.9, q: 60, body: 1.1, tick: 0.9 },
+  iron: { pitch: 0.78, sustain: 0.55, q: 30, body: 1.3, tick: 0.85 },
+  electrum: { pitch: 1.08, sustain: 1.3, q: 170, body: 0.85, tick: 1.05 },
+  roseGold: { pitch: 0.96, sustain: 1.0, q: 90, body: 1.0, tick: 0.95 },
+};
+
+/**
  * Procedural dice audio. No samples to ship: each impact is one burst of noise
  * struck through a set of resonators — the sharp top end of the contact itself,
  * then three high-Q modes ringing where the body of the die would — layered with
@@ -56,6 +81,13 @@ const SURFACES: Record<
   dice: { root: 1190, decay: 0.021, tick: 0.32, ring: 1.00, body: 0.33 },
 };
 export class DiceAudio {
+  /** The coin's metal, which sets its voice; the app changes it with the colourway. */
+  private coinMetal: CoinMetal = 'gold';
+
+  setCoinMetal(metal: CoinMetal) {
+    this.coinMetal = metal;
+  }
+
   private context: AudioContext | null = null;
   private master: GainNode | null = null;
   private noise: AudioBuffer | null = null;
@@ -328,7 +360,18 @@ export class DiceAudio {
     // crack, so a linear mapping left the median impact near inaudible. The
     // curve lifts the quiet end without flattening the loud end.
     const level = Math.pow(Math.max(0.06, Math.min(1, strength)), 0.55);
-    const voice = metal ? COIN[surface] : SURFACES[surface];
+    const metalVoice = COIN_VOICES[this.coinMetal];
+    const base = metal ? COIN[surface] : SURFACES[surface];
+    const voice = metal
+      ? {
+          root: base.root * metalVoice.pitch,
+          decay: base.decay * metalVoice.sustain,
+          tick: base.tick * metalVoice.tick,
+          ring: base.ring,
+          body: base.body * metalVoice.body,
+        }
+      : base;
+    const qCap = metal ? metalVoice.q : 26;
 
     // Bring the room tone up, and leave it decaying. Every contact re-raises it,
     // so it is continuous through a roll and gone a few seconds after the last
@@ -424,7 +467,7 @@ export class DiceAudio {
       // felt-lined leather box rings narrower than that.
       // Acrylic in a felt tray sits near Q 20; a coin is a struck disc of metal
       // and genuinely rings, so it is allowed a much narrower resonance.
-      const q = Math.min(Math.max((Math.PI * hz * t20) / 2.303, 3), metal ? 70 : 26);
+      const q = Math.min(Math.max((Math.PI * hz * t20) / 2.303, 3), qCap);
       const mode = context.createBiquadFilter();
       mode.type = 'bandpass';
       mode.frequency.value = hz;
