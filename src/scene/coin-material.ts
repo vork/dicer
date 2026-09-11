@@ -404,9 +404,13 @@ float coinMicroMark = 0.7 * coinMicro.z + coinMicro.w;
 // surface, in the two directions the map's slopes are read along.
 vec3 coinAcrossObject = normalize(mix(vec3(1.0, 0.0, 0.0), -coinTangentObject, coinSideness));
 vec3 coinAlongObject = normalize(mix(vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 0.0), coinSideness));
+// Mostly in the field: the rim and the relief's crowns are the most evenly
+// worn parts of a coin, and on the domed, polished rim the swell broke the
+// highlight into blobs that read from across the tray as faults.
+float coinSwellAmount = 0.3 + 0.7 * coinCavity;
 float coinH0 = coinSwell(coinP);
-float coinSlopeU = coinSurface.x + (coinSwell(coinP + coinAcrossObject * 0.004) - coinH0) / 0.004;
-float coinSlopeV = coinSurface.y + (coinSwell(coinP + coinAlongObject * 0.004) - coinH0) / 0.004;
+float coinSlopeU = coinSurface.x + coinSwellAmount * (coinSwell(coinP + coinAcrossObject * 0.004) - coinH0) / 0.004;
+float coinSlopeV = coinSurface.y + coinSwellAmount * (coinSwell(coinP + coinAlongObject * 0.004) - coinH0) / 0.004;
 vec3 coinU = normalize(mix(vCoinX, -vCoinTangent, coinSideness));
 vec3 coinV = normalize(mix(vCoinZ, vCoinAxis, coinSideness));
 float coinFootprint = length(fwidth(coinP));

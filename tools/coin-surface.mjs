@@ -402,24 +402,28 @@ export function bakeFace({ baseHeight, size, extent, rim, seed }) {
       }
     }
   }
-  // Dents.
+  // Dents, kept off the rim. The rim is the most evenly worn part of a coin,
+  // and it is domed and polished, so every dent that landed on it broke its
+  // highlight into a blob that read from across the tray as a fault.
   for (let n = 0; n < 70; n++) {
     const a = random() * Math.PI * 2;
-    const r = Math.sqrt(random()) * rim;
+    const radiusUnits = 0.008 + random() ** 2 * 0.028;
+    const r = Math.sqrt(random()) * (rim - 0.1 - radiusUnits);
     const x = Math.cos(a) * r, z = Math.sin(a) * r;
-    const radius = (0.008 + random() ** 2 * 0.028) / texel;
+    const radius = radiusUnits / texel;
     const depth = 0.003 + random() * 0.008;
     bowl(height, dents, 1, grid, false, toTexel(x), toTexel(z), radius, depth, random);
   }
-  // Nicks on the rim.
-  for (let n = 0; n < 14; n++) {
+  // A few nicks on the rim: shallow, since at the reveal's distance a deep one
+  // is a dark gap in the rim's highlight.
+  for (let n = 0; n < 6; n++) {
     const a = random() * Math.PI * 2;
     const r = rim - 0.01 - random() * 0.05;
     const x = Math.cos(a) * r, z = Math.sin(a) * r;
     const direction = a + Math.PI / 2 + (random() - 0.5) * 1.2;
-    const length = 0.02 + random() * 0.05;
+    const length = 0.02 + random() * 0.04;
     const ex = x + Math.cos(direction) * length, ez = z + Math.sin(direction) * length;
-    groove(height, dents, 1, grid, texel, false, toTexel(x), toTexel(z), toTexel(ex), toTexel(ez), (0.004 + random() * 0.004) / texel, 0.005 + random() * 0.006);
+    groove(height, dents, 0.7, grid, texel, false, toTexel(x), toTexel(z), toTexel(ex), toTexel(ez), (0.003 + random() * 0.002) / texel, 0.0015 + random() * 0.002);
   }
   // Porosity.
   for (let n = 0; n < 260; n++) {

@@ -562,6 +562,13 @@ blocks on the rim, hard-edged between quads, with a level top at the ring, that
 survived every test of the maps, the shadows and the reflections before the
 `coinDull` debug channel showed the same rectangles.
 
+The rim itself carries almost no wear. It is the most evenly worn part of a
+real coin, and it is domed and polished, so every dent that landed on it, every
+deep nick and the strike's swell wandering across it broke its highlight into
+bright and dark blobs that read from across the tray — on a phone at the reveal's
+distance — as faults in the shading. Dents now stay in the field, the rim's nicks
+are few and shallow, and the swell is mostly the field's.
+
 The asset build stores how deep into a recess each vertex sits in the UV slot the
 coin has no use for, and bakes how far each point of the field is from the foot
 of a wall into a 256-pixel map, one channel per face, that the shader samples by
