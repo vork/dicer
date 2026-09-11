@@ -553,6 +553,15 @@ seams: on an irregularly faceted surface the two faces either side of an edge se
 different sets, get different normals for the same point, and the edge shows,
 with the baked scratches jumping across it.
 
+The coin's outer side is told apart by its normal as well as its radius. It is
+not a perfect cylinder — its radius wanders by over a percent — and it has a
+vertex ring part-way down, at the field's height; a ring vertex that fell just
+inside the radius test was given the field's recess depth, the quads below it
+interpolated that, and the shader toned them dark like the field: rectangular
+blocks on the rim, hard-edged between quads, with a level top at the ring, that
+survived every test of the maps, the shadows and the reflections before the
+`coinDull` debug channel showed the same rectangles.
+
 The asset build stores how deep into a recess each vertex sits in the UV slot the
 coin has no use for, and bakes how far each point of the field is from the foot
 of a wall into a 256-pixel map, one channel per face, that the shader samples by

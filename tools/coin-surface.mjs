@@ -453,16 +453,19 @@ export function bakeEdge({ width, height: rows, rim, top, seed }) {
       height[py * width + px] = rounding(top - Math.abs(y), ROUND);
     }
   }
-  // Rubbed around the circumference: long shallow grooves along u.
-  for (let n = 0; n < 60; n++) {
+  // Rubbed around the circumference: short, fine, shallow hairlines along u.
+  // The first version ran them up to two thirds of the way round, a few texels
+  // wide and deep enough that both walls tilted away from the light, and each
+  // one read as a dark trough across the rim — a seam, not a scratch.
+  for (let n = 0; n < 70; n++) {
     const u = random() * width;
     const v = random() * rows;
-    const length = (0.04 + random() ** 2 * 0.4) / texelU;
-    const drift = (random() - 0.5) * 0.15;
-    groove(height, scratches, 0.5, grid, texelU, true, u, v, u + length, v + drift * length, (0.002 + random() * 0.003) / texelV, 0.0005 + random() ** 2 * 0.0015);
+    const length = (0.02 + random() ** 2 * 0.12) / texelU;
+    const drift = (random() - 0.5) * 0.12;
+    groove(height, scratches, 0.4, grid, texelU, true, u, v, u + length, v + drift * length, (0.0012 + random() * 0.0018) / texelV, 0.0002 + random() ** 2 * 0.0005);
   }
-  for (let n = 0; n < 30; n++) {
-    bowl(height, dents, 1, grid, true, random() * width, random() * rows, (0.004 + random() ** 2 * 0.01) / texelV, 0.0015 + random() * 0.003, random);
+  for (let n = 0; n < 24; n++) {
+    bowl(height, dents, 0.8, grid, true, random() * width, random() * rows, (0.003 + random() ** 2 * 0.008) / texelV, 0.0008 + random() * 0.0018, random);
   }
 
   return encode(height, scratches, dents, width, rows, texelU, texelV, true);
@@ -516,7 +519,7 @@ export function bakeMicro({ size, tile, seed }) {
   }
 
   // Micro-scratches: short, a texel or two wide, barely deep.
-  for (let n = 0; n < 140; n++) {
+  for (let n = 0; n < 110; n++) {
     const ax = random() * size, ay = random() * size;
     const direction = random() * Math.PI * 2;
     const length = (4 + random() ** 2 * 60);

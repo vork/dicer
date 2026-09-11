@@ -22,7 +22,7 @@ const option = (name) => {
   return i === -1 ? null : args[i + 1] ?? 'true';
 };
 const query = new URLSearchParams();
-for (const name of ['debug', 'coin', 'metal', 'env', 'elev', 'dist', 'yaw', 'size']) {
+for (const name of ['debug', 'coin', 'metal', 'env', 'elev', 'dist', 'yaw', 'size', 'noshadow', 'normalBias']) {
   const value = option(name);
   if (value !== null) query.set(name, value);
 }

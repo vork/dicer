@@ -461,7 +461,15 @@ async function main() {
     for (let i = 0; i < vertexCount; i++) {
       const x = position[i * 3], y = position[i * 3 + 1], z = position[i * 3 + 2];
       const r = Math.hypot(x, z);
-      const onRim = r > rim * 0.985;
+      // The coin's outer side, by its normal as well as its radius. The side is
+      // not a perfect cylinder — its radius wanders by over a percent — and it
+      // has a vertex ring part-way down, at the field's height; a ring vertex
+      // that fell just inside the radius test was given the field's cavity of
+      // 1, the quads below it interpolated that, and the shader toned them dark
+      // like the field: rectangular blocks on the rim, hard-edged between
+      // quads, with a level top at the ring.
+      const sideways = Math.abs(normal[i * 3 + 1]) < 0.5 && r > rim * 0.9;
+      const onRim = r > rim * 0.985 || sideways;
       const cavity = onRim ? 0 : Math.min(1, Math.max(0, (top - Math.abs(y)) / depth));
       uv[i * 2] = cavity;
       cavityOf[i] = cavity;

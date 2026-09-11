@@ -60,7 +60,11 @@
       }
 
       const mesh = new THREE.Mesh(assets.geometries.coin, coin.material);
-      mesh.castShadow = mesh.receiveShadow = true;
+      mesh.castShadow = true;
+      mesh.receiveShadow = !params.get('noshadow');
+      if (params.get('normalBias')) {
+        for (const light of scene.children) if (light.isDirectionalLight) light.shadow.normalBias = Number(params.get('normalBias'));
+      }
       mesh.position.set(0, TRAY.floorY + assets.info.coin.inradius, 0);
       if (params.get('tails')) mesh.rotation.x = Math.PI;
       mesh.rotation.y = Number(params.get('yaw') || 0.4);
