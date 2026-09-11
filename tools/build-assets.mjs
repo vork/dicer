@@ -446,8 +446,23 @@ async function main() {
       const bin = Math.round(h / 0.002) * 0.002;
       levels.set(bin, (levels.get(bin) || 0) + 1);
     }
-    const field = [...levels.entries()].sort((a, b) => b[1] - a[1])[0][0];
-    const depth = Math.max(top - field, 0.01);
+    const measuredField = [...levels.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    const measuredDepth = Math.max(top - measuredField, 0.01);
+
+    // The model's relief is a millimetre deep on a 25mm coin, which is four
+    // times what a struck coin carries and read as a stamping rather than a
+    // coin. Everything above the field is compressed toward the top by this
+    // factor — the field rises, the rim and the relief's tops stay where they
+    // are — so the coin keeps its thickness and its rim height and only the
+    // relief shallows. The side's ring at the field's height moves with it.
+    const RELIEF = 0.35;
+    for (let i = 1; i < position.length; i += 3) {
+      const y = position[i];
+      if (Math.abs(y) < measuredField - 0.002) continue;
+      position[i] = Math.sign(y) * (top - (top - Math.abs(y)) * RELIEF);
+    }
+    const depth = measuredDepth * RELIEF;
+    const field = top - depth;
 
     // One channel the shader reads as weathering rather than as texture space.
     // The coin carries no texture, so the UV slot is free.

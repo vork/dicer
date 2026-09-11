@@ -450,7 +450,11 @@ number; a pool of nothing but coins is counted as heads. It comes from an STL
 rather than the dice set's GLB, so the asset build reads binary STL, welds the
 soup of triangles into a mesh with smooth faces and hard edges (a 42° crease), and
 measures the relief off the model: the field level is the most common height in a
-histogram of the face, and everything above it is relief. That measurement is
+histogram of the face, and everything above it is relief. The model's relief is
+a millimetre deep on a 25 mm coin, four times what a struck coin carries, and read
+as a stamping; the build compresses everything above the field toward the top by
+0.35, so the field rises while the rim and the relief's crowns stay put, the coin
+keeps its thickness, and the relief comes out 0.35 mm deep. That measurement is
 what the material works from, and the relief's outline, rasterised, is what its
 normal map is baked from.
 

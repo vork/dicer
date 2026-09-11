@@ -241,10 +241,12 @@ export function bakeOutlineHeight({ raised, size, extent, rim }) {
   const intoRaised = distanceTransform(field, size, size);
   const intoField = distanceTransform(raised, size, size);
 
-  const ROUND = 0.02;
-  const FILLET = 0.01;
+  // Scaled to a relief 0.018 deep: the rounding and the dome cannot exceed
+  // the height they are rounding off.
+  const ROUND = 0.014;
+  const FILLET = 0.006;
   const RIM_ROUND = 0.03;
-  const DOME = 0.012;
+  const DOME = 0.006;
   const DOME_WIDTH = 0.05;
   for (let py = 0; py < size; py++) {
     const z = ((py + 0.5) / size) * 2 * extent - extent;
