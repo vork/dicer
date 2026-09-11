@@ -534,7 +534,14 @@ tilt rather than flickering, where the first version of this coin, with its
 detail computed per pixel from noise finer than a pixel, crawled with sparkle
 whenever the camera moved. The distance to each outline comes from an exact
 Euclidean distance transform over the rasterised relief, which also feeds the
-grime map. Baking the swell and grain too made the map two megabytes — noise in
+grime map. It is taken at four times the map's resolution and the heights that
+follow from it filtered down, because a distance field off a binary outline is a
+staircase at texel scale, and a rounding driven by a staircase drew as a serrated
+line along the top of every wall and both edges of the rim. The rounding's
+profile is a parabola rather than a quarter circle for a related reason: a
+circle stands vertical at the edge, an infinite slope the map could only clamp,
+texel by texel along the staircase, which beaded the rim's outer edge with
+bright dots; the parabola's slope is exactly one at the edge and never clamps. Baking the swell and grain too made the map two megabytes — noise in
 every texel — where the damage alone, flat everywhere else, is under four
 hundred kilobytes.
 

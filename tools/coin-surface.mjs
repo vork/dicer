@@ -196,14 +196,85 @@ export function rasteriseRaised({ position, index, cavityOf, side, rim, size, ex
 }
 
 /**
- * A rounded-off edge: an elliptical drop over a width r in from the edge, to a
- * depth of half that. A full quarter circle read as a pillow — the relief
- * looked melted rather than worn.
+ * A rounded-off edge: a parabolic drop over a width r in from the edge, to a
+ * depth of half that, steepest at the edge where its slope is exactly 1. A
+ * full quarter circle read as a pillow — the relief looked melted rather than
+ * worn — and an elliptical profile, like a circle, stands vertical at the edge:
+ * an infinite slope that the map could only clamp, texel by texel along a
+ * staircase outline, which drew as a beaded line along every edge.
  */
 function rounding(d, r) {
   if (d >= r) return 0;
-  const t = (r - d) / r;
-  return -0.5 * r * (1 - Math.sqrt(Math.max(0, 1 - t * t)));
+  const s = Math.max(0, d) / r;
+  return -0.5 * r * (1 - s) * (1 - s);
+}
+
+/** Box-filters a square field down by an integer ratio. */
+export function downsample(field, size, ratio) {
+  const out = new Float64Array((size / ratio) * (size / ratio));
+  const small = size / ratio;
+  for (let y = 0; y < small; y++) {
+    for (let x = 0; x < small; x++) {
+      let sum = 0;
+      for (let dy = 0; dy < ratio; dy++) {
+        for (let dx = 0; dx < ratio; dx++) sum += field[(y * ratio + dy) * size + x * ratio + dx];
+      }
+      out[y * small + x] = sum / (ratio * ratio);
+    }
+  }
+  return out;
+}
+
+/**
+ * The part of a face's height that follows the relief's outline: the doming,
+ * the rounded edges, the fillets at the feet, the rim. Computed at whatever
+ * resolution the mask comes in at — the build uses four times the map's, and
+ * filters the result down — because a distance field off a binary outline is
+ * a staircase at texel scale, and a rounding driven by a staircase is a
+ * serrated rounding.
+ */
+export function bakeOutlineHeight({ raised, size, extent, rim }) {
+  const texel = (2 * extent) / size;
+  const height = new Float64Array(size * size);
+  const field = new Uint8Array(size * size);
+  for (let i = 0; i < size * size; i++) field[i] = raised[i] ? 0 : 1;
+  const intoRaised = distanceTransform(field, size, size);
+  const intoField = distanceTransform(raised, size, size);
+
+  const ROUND = 0.02;
+  const FILLET = 0.01;
+  const RIM_ROUND = 0.03;
+  const DOME = 0.012;
+  const DOME_WIDTH = 0.05;
+  for (let py = 0; py < size; py++) {
+    const z = ((py + 0.5) / size) * 2 * extent - extent;
+    for (let px = 0; px < size; px++) {
+      const x = ((px + 0.5) / size) * 2 * extent - extent;
+      const i = py * size + px;
+      const r = Math.hypot(x, z);
+      let h = 0;
+      if (raised[i]) {
+        const inFromOutline = Math.min(intoRaised[i] * texel, rim - r);
+        h += rounding(inFromOutline, ROUND);
+        // The rim's outer edge. Continuous past the rim — the same depth all
+        // the way out — so nothing outside the coin can bleed a step back in
+        // through the mip chain.
+        h += rounding(rim - r, RIM_ROUND);
+        // Struck relief is not a flat plate on a flat field: the die's engraving
+        // is convex, so every stroke of the design swells from its edges to a
+        // crown along its middle, and the rim likewise. An extrusion with a
+        // level top read as cut out of sheet, whatever was done to its edges.
+        const t = Math.max(0, Math.min(1, inFromOutline / DOME_WIDTH));
+        h += DOME * t * t * (3 - 2 * t);
+      } else {
+        // A concave fillet at the foot: the surface rises to meet the wall.
+        const d = intoField[i] * texel;
+        if (d < FILLET) h += FILLET * (1 - d / FILLET) ** 2 * 0.5;
+      }
+      height[i] = h;
+    }
+  }
+  return height;
 }
 
 /** Stamps a capsule-shaped groove: depth along its spine, falling off across it. */
@@ -284,58 +355,16 @@ function encode(height, scratches, dents, width, height_, texelU, texelV, wrapX)
 }
 
 /**
- * One face. `raised` is the raised mask over the same grid, `rim` the coin's
- * radius, `seed` different per face so the two are not the same coin twice.
+ * One face: the damage, stamped over the outline height from bakeOutlineHeight
+ * (already at this size). `seed` differs per face so the two are not the same
+ * coin twice.
  */
-export function bakeFace({ raised, size, extent, rim, seed }) {
+export function bakeFace({ baseHeight, size, extent, rim, seed }) {
   const texel = (2 * extent) / size;
-  const height = new Float64Array(size * size);
+  const height = Float64Array.from(baseHeight);
   const scratches = new Float64Array(size * size);
   const dents = new Float64Array(size * size);
   const random = mulberry32(seed);
-
-  // Distance to the outline from either side of it, in coin units.
-  const field = new Uint8Array(size * size);
-  for (let i = 0; i < size * size; i++) field[i] = raised[i] ? 0 : 1;
-  const intoRaised = distanceTransform(field, size, size); // for raised texels: distance to the field
-  const intoField = distanceTransform(raised, size, size); // for field texels: distance to raised
-
-  const ROUND = 0.02;
-  const FILLET = 0.01;
-  const RIM_ROUND = 0.03;
-  const DOME = 0.012;
-  const DOME_WIDTH = 0.05;
-  for (let py = 0; py < size; py++) {
-    const z = ((py + 0.5) / size) * 2 * extent - extent;
-    for (let px = 0; px < size; px++) {
-      const x = ((px + 0.5) / size) * 2 * extent - extent;
-      const i = py * size + px;
-      const r = Math.hypot(x, z);
-      if (r > rim + 0.02) continue;
-      let h = 0;
-      if (raised[i]) {
-        const inFromOutline = Math.min(intoRaised[i] * texel, rim - r);
-        h += rounding(inFromOutline, ROUND);
-        // The rim's outer edge.
-        h += rounding(rim - r, RIM_ROUND);
-        // Struck relief is not a flat plate on a flat field: the die's engraving
-        // is convex, so every stroke of the design swells from its edges to a
-        // crown along its middle, and the rim likewise. An extrusion with a
-        // level top read as cut out of sheet, whatever was done to its edges.
-        const t = Math.min(1, inFromOutline / DOME_WIDTH);
-        h += DOME * t * t * (3 - 2 * t);
-      } else {
-        // A concave fillet at the foot: the surface rises to meet the wall.
-        const d = intoField[i] * texel;
-        if (d < FILLET) h += FILLET * (1 - d / FILLET) ** 2 * 0.5;
-      }
-      // The strike's swell and the fine grain are the shader's: baked, they
-      // were noise in every texel and the map was two megabytes; computed,
-      // they are a few noise calls. What is left here is flat but for the
-      // damage, and compresses to a fraction of that.
-      height[i] = h;
-    }
-  }
 
   const grid = { width: size, height: size };
   const toTexel = (v) => ((v + extent) / (2 * extent)) * size;

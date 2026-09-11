@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import sharp from 'sharp';
-import { MICRO_TILES_AROUND, bakeEdge, bakeFace, bakeMicro, distanceTransform, rasteriseRaised } from './coin-surface.mjs';
+import { MICRO_TILES_AROUND, bakeEdge, bakeFace, bakeMicro, bakeOutlineHeight, distanceTransform, downsample, rasteriseRaised } from './coin-surface.mjs';
 import { readGlb, readAccessor, readImage, matrixScale, writeGlb } from './glb.mjs';
 
 const SOURCE = process.argv[2] || '/root/.claude/uploads/80492aad-1b8b-5ad8-b105-0b761a0e5602/7bfb6e53-rpg_dice_set_1.glb';
@@ -480,6 +480,10 @@ async function main() {
     // The same masks drive the surface bake (see coin-surface.mjs): the slope
     // maps that round the relief's edges, and cut the scratches and dents.
     const SURFACE_SIZE = 512;
+    // The outline is rasterised and its distances taken at this size, and the
+    // heights that follow from it filtered down to the map's: a distance field
+    // off a binary outline is a staircase at texel scale.
+    const OUTLINE_SIZE = 2048;
     const WEAR_SIZE = 256;
     // The textures span this many units either side of the axis, for every
     // coin, so nothing has to be told the coin's radius to read them.
@@ -490,21 +494,16 @@ async function main() {
     const wear = Buffer.alloc(WEAR_SIZE * WEAR_SIZE * 3);
     const faceMaps = [];
     for (const [channel, side] of [[0, 1], [1, -1]]) {
-      const raised = rasteriseRaised({ position, index, cavityOf, side, rim, size: SURFACE_SIZE, extent: WEAR_EXTENT });
-      const distance = distanceTransform(raised, SURFACE_SIZE, SURFACE_SIZE);
-      const texel = (2 * WEAR_EXTENT) / SURFACE_SIZE;
-      // Box-filtered down to the wear map's size.
-      const ratio = SURFACE_SIZE / WEAR_SIZE;
-      for (let py = 0; py < WEAR_SIZE; py++) {
-        for (let px = 0; px < WEAR_SIZE; px++) {
-          let sum = 0;
-          for (let dy = 0; dy < ratio; dy++) {
-            for (let dx = 0; dx < ratio; dx++) sum += Math.min(1, (distance[(py * ratio + dy) * SURFACE_SIZE + px * ratio + dx] * texel) / WEAR_RANGE);
-          }
-          wear[(py * WEAR_SIZE + px) * 3 + channel] = Math.round((sum / (ratio * ratio)) * 255);
-        }
-      }
-      faceMaps.push(bakeFace({ raised, size: SURFACE_SIZE, extent: WEAR_EXTENT, rim, seed: 11 + channel * 97 }));
+      const raised = rasteriseRaised({ position, index, cavityOf, side, rim, size: OUTLINE_SIZE, extent: WEAR_EXTENT });
+      const distance = distanceTransform(raised, OUTLINE_SIZE, OUTLINE_SIZE);
+      const texel = (2 * WEAR_EXTENT) / OUTLINE_SIZE;
+      const fraction = new Float64Array(OUTLINE_SIZE * OUTLINE_SIZE);
+      for (let i = 0; i < fraction.length; i++) fraction[i] = Math.min(1, (distance[i] * texel) / WEAR_RANGE);
+      const wearField = downsample(fraction, OUTLINE_SIZE, OUTLINE_SIZE / WEAR_SIZE);
+      for (let i = 0; i < WEAR_SIZE * WEAR_SIZE; i++) wear[i * 3 + channel] = Math.round(wearField[i] * 255);
+      const outline = bakeOutlineHeight({ raised, size: OUTLINE_SIZE, extent: WEAR_EXTENT, rim });
+      const baseHeight = downsample(outline, OUTLINE_SIZE, OUTLINE_SIZE / SURFACE_SIZE);
+      faceMaps.push(bakeFace({ baseHeight, size: SURFACE_SIZE, extent: WEAR_EXTENT, rim, seed: 11 + channel * 97 }));
     }
     await sharp(wear, { raw: { width: WEAR_SIZE, height: WEAR_SIZE, channels: 3 } })
       .png({ compressionLevel: 9 })
