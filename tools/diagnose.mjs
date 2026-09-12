@@ -20,7 +20,7 @@ page.on('requestfailed', (r) => console.error('[request failed]', r.url(), r.fai
 page.on('response', (r) => { if (r.status() >= 400) console.error('[http]', r.status(), r.url()); });
 
 try {
-  await page.goto('http://127.0.0.1:5195/', { waitUntil: 'load' });
+  await page.goto('http://127.0.0.1:5195/?quality=high', { waitUntil: 'load' });
   await page.waitForFunction(
     () => {
       const loader = document.getElementById('loader');

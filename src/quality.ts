@@ -14,12 +14,14 @@
  * the post chain is the second. The tiers pull them in that order:
  *
  *   high    the full look — pixel ratio up to 2, MSAA 4x, the whole chain
- *   medium  pixel ratio up to 1.5, half-resolution bloom, a lighter blur, plain
- *           shadows, no chromatic aberration, nothing blurred behind the HUD
+ *   medium  pixel ratio up to 1.5, half-resolution bloom, a lighter blur, a
+ *           2048 shadow map, no chromatic aberration, nothing blurred behind
+ *           the HUD
  *   low     pixel ratio 1 and no post chain at all: the scene is drawn straight
  *           to the canvas with tone mapping in the materials, the vignette is a
  *           CSS overlay, shadows are 1024 texels, the coin's procedural
- *           weathering runs fewer octaves, and idle frames render at half rate
+ *           weathering runs fewer octaves, the ground is a Lambert surface, and
+ *           idle frames render at half rate
  *
  * A tier is chosen at start-up from a `?quality=` override, a tier remembered
  * from an earlier session, or a look at the GPU; after that a monitor watches
@@ -53,12 +55,12 @@ export interface QualitySettings {
   aberration: boolean;
   /** Shadow map size in texels; 0 lets the screen decide (4096 on a large one). */
   shadowMap: number;
-  /** Percentage-closer soft shadows against plain 2x2 PCF. */
-  softShadows: boolean;
   /** Anisotropic filtering on the dice and coin maps. */
   anisotropy: number;
   /** The coin shader's procedural detail: octaves of noise per pixel. */
   coinDetail: 'full' | 'lite';
+  /** The tray's materials: the ground's shader, the felt's sheen, the leather's clear coat. */
+  trayDetail: 'full' | 'lite';
   /** Frames skipped between rendered ones while nothing is moving. */
   idleFrameSkip: number;
 }
@@ -76,9 +78,9 @@ export const QUALITY: Record<QualityTier, QualitySettings> = {
     bloomScale: 1,
     aberration: true,
     shadowMap: 0,
-    softShadows: true,
     anisotropy: 16,
     coinDetail: 'full',
+    trayDetail: 'full',
     idleFrameSkip: 0,
   },
   medium: {
@@ -93,9 +95,9 @@ export const QUALITY: Record<QualityTier, QualitySettings> = {
     bloomScale: 0.5,
     aberration: false,
     shadowMap: 2048,
-    softShadows: false,
     anisotropy: 4,
     coinDetail: 'full',
+    trayDetail: 'full',
     idleFrameSkip: 0,
   },
   low: {
@@ -110,9 +112,9 @@ export const QUALITY: Record<QualityTier, QualitySettings> = {
     bloomScale: 0.25,
     aberration: false,
     shadowMap: 1024,
-    softShadows: false,
     anisotropy: 2,
     coinDetail: 'lite',
+    trayDetail: 'lite',
     idleFrameSkip: 1,
   },
 };

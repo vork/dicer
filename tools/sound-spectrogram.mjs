@@ -114,7 +114,7 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage();
 try {
-  await page.goto('http://127.0.0.1:5208/', { waitUntil: 'commit' });
+  await page.goto('http://127.0.0.1:5208/?quality=high', { waitUntil: 'commit' });
   const files = process.argv.slice(2);
   const clips = [];
   for (const f of files) {

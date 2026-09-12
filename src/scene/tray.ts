@@ -58,8 +58,18 @@ function roundedRect(width: number, depth: number, radius: number): THREE.Shape 
 
 export interface Tray {
   group: THREE.Group;
+  /**
+   * What the tray's materials spend per pixel. 'lite' is for a GPU that cannot
+   * afford the full look: the ground, which fills most of the frame around the
+   * tray, becomes a Lambert surface, and the felt's sheen and the leather's
+   * clear coat are dropped. Measured on tools/bench.mjs, that is 22% of the
+   * scene pass on the lowest tier.
+   */
+  setDetail(detail: TrayDetail): void;
   dispose(): void;
 }
+
+export type TrayDetail = 'full' | 'lite';
 
 /**
  * Extrudes a flat profile into an upright solid.
@@ -194,25 +204,40 @@ export function createTray(): Tray {
   group.add(base);
 
   // --- ground the tray on something, so it is not floating in a void --------
-  const ground = new THREE.Mesh(
-    new THREE.CircleGeometry(70, 64),
-    new THREE.MeshPhysicalMaterial({
-      color: 0x08080b,
-      roughness: 0.72,
-      metalness: 0.15,
-      normalMap: leather.normalMap,
-      normalScale: new THREE.Vector2(0.25, 0.25),
-      envMapIntensity: 0.35,
-    }),
-  );
+  const groundMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0x08080b,
+    roughness: 0.72,
+    metalness: 0.15,
+    normalMap: leather.normalMap,
+    normalScale: new THREE.Vector2(0.25, 0.25),
+    envMapIntensity: 0.35,
+  });
+  // The ground covers more of the frame than anything else and is nearly
+  // black, so on a slow GPU it is the cheapest shader that still takes the
+  // tray's shadow.
+  const groundLite = new THREE.MeshLambertMaterial({ color: 0x08080b });
+  const ground = new THREE.Mesh<THREE.BufferGeometry, THREE.Material>(new THREE.CircleGeometry(70, 64), groundMaterial);
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = TRAY.floorY - 0.78;
   ground.receiveShadow = true;
   group.add(ground);
 
+  const fullSheen = floorMaterial.sheen;
+  const fullClearcoat = wallMaterial.clearcoat;
+  let detail: TrayDetail = 'full';
+
   return {
     group,
+    setDetail(next) {
+      if (next === detail) return;
+      detail = next;
+      ground.material = next === 'lite' ? groundLite : groundMaterial;
+      floorMaterial.sheen = next === 'lite' ? 0 : fullSheen;
+      wallMaterial.clearcoat = next === 'lite' ? 0 : fullClearcoat;
+    },
     dispose() {
+      groundLite.dispose();
+      groundMaterial.dispose();
       group.traverse((object) => {
         const mesh = object as THREE.Mesh;
         if (!mesh.isMesh) return;

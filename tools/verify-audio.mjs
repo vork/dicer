@@ -55,7 +55,7 @@ const rollWithMouse = async () => {
 };
 
 try {
-  await page.goto('http://127.0.0.1:5190/', { waitUntil: 'load' });
+  await page.goto('http://127.0.0.1:5190/?quality=high', { waitUntil: 'load' });
   await page.waitForFunction(
     () => {
       const loader = document.getElementById('loader');

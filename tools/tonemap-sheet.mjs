@@ -94,7 +94,7 @@ const shot = async () => sharp(await page.screenshot({ type: 'png', timeout: 600
 
 let failed = false;
 try {
-  await page.goto('http://127.0.0.1:5222/', { waitUntil: 'load' });
+  await page.goto('http://127.0.0.1:5222/?quality=high', { waitUntil: 'load' });
   await page.waitForFunction('window.dicer && window.dicer.debug', null, { timeout: 120000 });
   await page.waitForFunction(() => {
     const l = document.getElementById('loader');

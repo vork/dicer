@@ -169,7 +169,7 @@ function changed(a, b) {
 
 let failed = false;
 try {
-  await page.goto('http://127.0.0.1:5219/', { waitUntil: 'load' });
+  await page.goto('http://127.0.0.1:5219/?quality=high', { waitUntil: 'load' });
   await page.waitForFunction('window.dicer && window.dicer.debug', null, { timeout: 120000 });
   await page.waitForFunction(() => {
     const l = document.getElementById('loader');

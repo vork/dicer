@@ -3,7 +3,7 @@ import type RAPIER from '@dimforge/rapier3d-compat';
 
 import { loadDiceAssets, loadSetTextures, type DiceAssets, type DiceSet } from './assets';
 import { createEnvironment, createLights } from './scene/environment';
-import { createTray, TRAY } from './scene/tray';
+import { createTray, TRAY, type Tray } from './scene/tray';
 import { createDiceMaterial, type DiceMaterial, type FlakeSettings } from './scene/dice-material';
 import { createCoinMaterial, type CoinMaterial, type CoinSettings } from './scene/coin-material';
 import { createPostFx, type PostFx } from './scene/postfx';
@@ -78,6 +78,7 @@ export class App {
   private input!: ThrowInput;
   private dice!: DiceMaterial;
   private coin!: CoinMaterial;
+  private tray!: Tray;
   private diceMaterial!: THREE.MeshPhysicalMaterial;
 
   private activeSet!: DiceSet;
@@ -120,7 +121,7 @@ export class App {
     this.renderer.setPixelRatio(this.pixelRatio());
     this.renderer.setSize(window.innerWidth, window.innerHeight, false);
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = this.quality.softShadows ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     // Redrawn on demand — see shadowFramesDue.
     this.renderer.shadowMap.autoUpdate = false;
     this.applyQualityToDocument();
@@ -157,8 +158,9 @@ export class App {
     this.keyLight = lights[0] as THREE.DirectionalLight;
     for (const light of lights) this.scene.add(light);
 
-    const tray = createTray();
-    this.scene.add(tray.group);
+    this.tray = createTray();
+    this.tray.setDetail(this.quality.trayDetail);
+    this.scene.add(this.tray.group);
 
     this.dice = createDiceMaterial();
     this.diceMaterial = this.dice.material;
@@ -292,7 +294,6 @@ export class App {
     this.monitor.reset();
     this.applyQualityToDocument();
 
-    this.renderer.shadowMap.type = this.quality.softShadows ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
     const size = this.shadowMapSize();
     if (this.keyLight && this.keyLight.shadow.mapSize.x !== size) {
       this.keyLight.shadow.mapSize.set(size, size);
@@ -301,6 +302,7 @@ export class App {
     }
     this.shadowFramesDue = 2;
     this.coin?.setDetail(this.quality.coinDetail);
+    this.tray?.setDetail(this.quality.trayDetail);
     this.postFx?.configure(this.quality);
     this.handleResize();
   }
@@ -466,10 +468,7 @@ export class App {
       setBloom: (strength: number, radius: number, threshold: number) =>
         this.postFx.setBloom(strength, radius, threshold),
       setGrain: (amount: number) => this.postFx.setGrain(amount),
-      setMotionBlur: (amount: number) => {
-        this.postFx.setMotionBlur(amount);
-        this.postFx.setMoving(amount > 0);
-      },
+      setMotionBlur: (amount: number) => this.postFx.setMotionBlur(amount),
       quality: () => ({ ...this.quality, reason: this.qualityChoice.reason, pinned: this.qualityChoice.pinned, gpu: this.gpu }),
       setQuality: (tier: QualityTier) => this.applyQuality(tier, false),
       samplesReport: () => this.postFx.samplesReport(),
@@ -481,7 +480,13 @@ export class App {
       pause: (paused: boolean) => {
         this.paused = paused;
       },
-      renderFrame: (delta = 1 / 60) => this.postFx.render(delta),
+      // A frame rendered by hand runs the whole chain, velocity pass included,
+      // whatever the dice are doing: the tools that pose a scene and read the
+      // velocity buffer back expect it to describe the frame they just drew.
+      renderFrame: (delta = 1 / 60) => {
+        this.postFx.setMoving(true);
+        this.postFx.render(delta);
+      },
       /**
        * Times one frame stage by stage, GPU drained between them, with the
        * shadow map's share separated out by rendering the scene pass twice:

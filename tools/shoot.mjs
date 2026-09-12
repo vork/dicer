@@ -56,7 +56,7 @@ const frames = (n) =>
   );
 
 try {
-  await page.goto('http://127.0.0.1:5196/', { waitUntil: 'load' });
+  await page.goto('http://127.0.0.1:5196/?quality=high', { waitUntil: 'load' });
   await page.waitForFunction('window.dicer && window.dicer.debug', null, { timeout: 120000 });
   // The loader fades out and then removes itself, so "visible and .done" is a
   // race; accept either state.

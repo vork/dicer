@@ -225,10 +225,10 @@ body[data-quality='low'] {
   background: radial-gradient(
     circle farthest-corner at 50% 50%,
     rgba(5, 5, 7, 0) 0%,
-    rgba(5, 5, 7, 0.12) 30%,
-    rgba(5, 5, 7, 0.34) 50%,
-    rgba(5, 5, 7, 0.7) 78%,
-    rgba(5, 5, 7, 0.94) 100%
+    rgba(5, 5, 7, 0.16) 30%,
+    rgba(5, 5, 7, 0.42) 50%,
+    rgba(5, 5, 7, 0.8) 78%,
+    rgba(5, 5, 7, 0.96) 100%
   );
 }
 

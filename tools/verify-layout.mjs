@@ -36,7 +36,7 @@ try {
     const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
     page.on('pageerror', (error) => failures.push(`${name}: ${error.message}`));
 
-    await page.goto('http://127.0.0.1:5191/', { waitUntil: 'load' });
+    await page.goto('http://127.0.0.1:5191/?quality=high', { waitUntil: 'load' });
     await page.waitForFunction(
       () => {
         const loader = document.getElementById('loader');

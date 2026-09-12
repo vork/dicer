@@ -746,9 +746,10 @@ Then three tiers, in `src/quality.ts`:
 | motion blur | 11 taps, 12-sample search | 7 taps, 8-sample search | off |
 | bloom | at CSS resolution | at half CSS resolution | off |
 | chromatic aberration | yes | no | no |
-| shadow map | 4096 on a large screen, else 2048, soft PCF | 2048, PCF | 1024, PCF |
+| shadow map | 4096 on a large screen, else 2048 | 2048 | 1024 |
 | anisotropic filtering | 16 | 4 | 2 |
 | coin weathering | four octaves | four octaves | two, and no sub-pixel terms |
+| ground, felt sheen, leather clear coat | full | full | Lambert ground, no sheen, no clear coat |
 | blur behind the HUD | yes | no | no |
 | idle frames | every frame | every frame | every other frame |
 
@@ -765,9 +766,17 @@ The same rolling frame, after:
 
 | tier | rolling | settled | of the original |
 | --- | ---: | ---: | ---: |
-| high | 1246 ms | 843 ms | 86% / 58% |
-| medium | 697 ms | 506 ms | 48% / 35% |
-| low | 255 ms | 228 ms | 18% / 16%, and half the idle frames |
+| high | 1291 ms | 942 ms | 89% / 65% |
+| medium | 721 ms | 560 ms | 50% / 39% |
+| low | 185 ms | 178 ms | 13% / 12%, and half the idle frames |
+
+The low tier's scene pass was probed further, one thing at a time. Hiding the
+ground plane halved it: nearly black, but it fills more of the frame than
+anything else, and it was a full physical material with a normal map, an
+environment map and a shadow lookup on every one of those pixels. A Lambert
+ground with the felt's sheen and the leather's clear coat dropped took 22% off
+the pass; fog, the flakes and the ground's normal map made no measurable
+difference and stay.
 
 A device lands on a tier three ways. `?quality=high`, `medium` or `low` on the
 URL pins it, for comparing them on one phone. Otherwise a tier remembered in
@@ -1441,7 +1450,10 @@ pose, not the antialiasing.
 | `npm run fonts` | re-vendor the web fonts into `public/fonts/` |
 
 The headless tools need a Chromium; set `PLAYWRIGHT_CHROMIUM` if Playwright's own
-download is not present.
+download is not present. They load the app with `?quality=high` pinned: the
+software GPU they run on is on the weak-GPU list, and without the pin the app
+would quite correctly start on the low tier, with no composer to check the
+antialiasing of and no motion blur to measure.
 
 ## Credits
 
