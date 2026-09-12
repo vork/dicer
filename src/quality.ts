@@ -211,41 +211,68 @@ export function chooseQuality(search = window.location.search, gpu = describeGpu
 /**
  * Watches the sustained frame rate and says when it has stayed too low.
  *
- * Works on a window of recent frame intervals, judged by their median so that
+ * Works on windows of recent frame intervals, judged by their median so that
  * a lone hitch — a shader compiling, a tab coming back — cannot trip it. The
- * first frames after a change of tier are ignored altogether: every new program
+ * first stretch after a change of tier is ignored altogether: every new program
  * compiles on its first draw, and those frames say nothing about the device.
+ *
+ * Everything here is in time, not frames. The first version counted frames —
+ * ninety to warm up, sixty to judge — and on a phone crawling at five frames a
+ * second that was half a minute before it did anything, while frames over a
+ * quarter of a second were thrown out as stalls, which on the slowest phones
+ * was every frame. The device it existed for was the one it could not see.
  */
 export class FrameRateMonitor {
-  /** Frames ignored after a reset. */
-  static readonly WARMUP = 90;
-  /** Frames judged at a time. */
-  static readonly WINDOW = 60;
+  /** After a reset, this much time is ignored, and never fewer frames than this. */
+  static readonly WARMUP_MS = 1500;
+  static readonly WARMUP_FRAMES = 12;
+  /** A window is judged once it spans this much time, or holds this many frames. */
+  static readonly WINDOW_MS = 2000;
+  static readonly WINDOW_FRAMES = 60;
+  /** But never on fewer than this: a median of two frames is not a rate. */
+  static readonly MIN_FRAMES = 6;
   /** A median frame longer than this, in ms, is a device that cannot keep up. */
   static readonly LIMIT_MS = 1000 / 38;
-  /** Anything this long is a stall, not a frame, and is left out. */
-  static readonly HITCH_MS = 250;
+  /** A median this long is a crawl: skip straight to the lowest tier. */
+  static readonly CRAWL_MS = 90;
+  /** A frame this long is not a frame, it is the tab having been away. */
+  static readonly STALL_MS = 2000;
 
-  private warmup = FrameRateMonitor.WARMUP;
+  private warmupMs = FrameRateMonitor.WARMUP_MS;
+  private warmupFrames = FrameRateMonitor.WARMUP_FRAMES;
   private readonly frames: number[] = [];
+  private windowMs = 0;
+  /** The last window's median, for a readout. */
+  median = 0;
 
   reset() {
-    this.warmup = FrameRateMonitor.WARMUP;
+    this.warmupMs = FrameRateMonitor.WARMUP_MS;
+    this.warmupFrames = FrameRateMonitor.WARMUP_FRAMES;
     this.frames.length = 0;
+    this.windowMs = 0;
   }
 
-  /** Records one frame interval and reports whether the window has judged it slow. */
-  sample(ms: number): boolean {
-    if (ms <= 0 || ms >= FrameRateMonitor.HITCH_MS) return false;
-    if (this.warmup > 0) {
-      this.warmup--;
-      return false;
+  /**
+   * Records one frame interval. Returns how many tiers to drop: 0 while the
+   * device keeps up or the window is still filling, 1 when it is slow, 2 when
+   * it is crawling.
+   */
+  sample(ms: number): 0 | 1 | 2 {
+    if (ms <= 0 || ms >= FrameRateMonitor.STALL_MS) return 0;
+    if (this.warmupMs > 0 || this.warmupFrames > 0) {
+      this.warmupMs -= ms;
+      this.warmupFrames--;
+      return 0;
     }
     this.frames.push(ms);
-    if (this.frames.length < FrameRateMonitor.WINDOW) return false;
+    this.windowMs += ms;
+    if (this.frames.length < FrameRateMonitor.MIN_FRAMES) return 0;
+    if (this.frames.length < FrameRateMonitor.WINDOW_FRAMES && this.windowMs < FrameRateMonitor.WINDOW_MS) return 0;
     const sorted = [...this.frames].sort((a, b) => a - b);
-    const median = sorted[sorted.length >> 1];
+    this.median = sorted[sorted.length >> 1];
     this.frames.length = 0;
-    return median > FrameRateMonitor.LIMIT_MS;
+    this.windowMs = 0;
+    if (this.median > FrameRateMonitor.CRAWL_MS) return 2;
+    return this.median > FrameRateMonitor.LIMIT_MS ? 1 : 0;
   }
 }

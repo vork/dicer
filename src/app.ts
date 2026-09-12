@@ -212,6 +212,12 @@ export class App {
     window.addEventListener('resize', this.handleResize);
     document.addEventListener('visibilitychange', this.handleVisibility);
 
+    if (new URLSearchParams(window.location.search).has('stats')) {
+      this.stats = document.createElement('div');
+      this.stats.className = 'stats';
+      document.body.appendChild(this.stats);
+    }
+
     this.hud.hideLoader();
     this.running = true;
     this.clock.start();
@@ -344,15 +350,12 @@ export class App {
     // A device that cannot keep up is moved down a tier. Not while a tool has
     // pinned the tier, and not for a seeded run, which is timed by the frame
     // count rather than the clock.
-    if (
-      !this.qualityChoice.pinned &&
-      !this.diceWorld.seeded &&
-      !document.hidden &&
-      this.quality.tier !== 'low' &&
-      this.monitor.sample(measured * 1000)
-    ) {
-      this.applyQuality(lowerTier(this.quality.tier), true);
+    if (!this.qualityChoice.pinned && !this.diceWorld.seeded && !document.hidden && this.quality.tier !== 'low') {
+      const drop = this.monitor.sample(measured * 1000);
+      if (drop === 2) this.applyQuality('low', true);
+      else if (drop === 1) this.applyQuality(lowerTier(this.quality.tier), true);
     }
+    this.updateStats(measured);
 
     // While nothing moves, the lowest tier draws every other frame. The time
     // is carried, so the camera's drift covers the same ground.
@@ -403,6 +406,27 @@ export class App {
     if (this.shadowFramesDue > 0) this.shadowFramesDue--;
     this.postFx.render(delta);
   };
+
+  /**
+   * A readout for testing on a phone, where there is no console: `?stats` on
+   * the URL shows the tier, where it came from, the frame rate and the GPU.
+   */
+  private stats: HTMLElement | null = null;
+  private statsFrames = 0;
+  private statsMs = 0;
+  private updateStats(measured: number) {
+    if (!this.stats) return;
+    this.statsFrames++;
+    this.statsMs += measured * 1000;
+    if (this.statsMs < 500) return;
+    const fps = (1000 * this.statsFrames) / this.statsMs;
+    this.statsFrames = 0;
+    this.statsMs = 0;
+    const judged = this.monitor.median ? `, monitor median ${this.monitor.median.toFixed(0)} ms` : '';
+    this.stats.textContent =
+      `${this.quality.tier} (${this.qualityChoice.reason}) · ${fps.toFixed(0)} fps${judged} · ` +
+      `${this.renderer.getPixelRatio()}x · ${this.gpu || 'gpu unknown'}`;
+  }
 
   /** Solver time per frame over the last few seconds, for the benchmark. */
   private readonly stepTimes: number[] = [];
@@ -469,7 +493,13 @@ export class App {
         this.postFx.setBloom(strength, radius, threshold),
       setGrain: (amount: number) => this.postFx.setGrain(amount),
       setMotionBlur: (amount: number) => this.postFx.setMotionBlur(amount),
-      quality: () => ({ ...this.quality, reason: this.qualityChoice.reason, pinned: this.qualityChoice.pinned, gpu: this.gpu }),
+      quality: () => ({
+        ...this.quality,
+        reason: this.qualityChoice.reason,
+        pinned: this.qualityChoice.pinned,
+        gpu: this.gpu,
+        monitorMedian: this.monitor.median,
+      }),
       setQuality: (tier: QualityTier) => this.applyQuality(tier, false),
       samplesReport: () => this.postFx.samplesReport(),
       readVelocity: () => this.postFx.readVelocity(),

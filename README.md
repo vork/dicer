@@ -789,15 +789,27 @@ The list is deliberately short — a device it misses starts a tier too high and
 is caught by what follows, whereas one it catches wrongly is stuck looking
 worse than it should.
 
-What follows is a monitor on the frame rate. It ignores the first ninety
-frames after any change of tier, since every new program compiles on its
-first draw and those frames say nothing about the device; then it judges
-windows of sixty frames by their median, so a lone hitch cannot trip it, and a
-median over 26 ms — under 38 fps — steps the tier down and remembers it. It
-never steps up on its own: a device that has proved slow once is slow. One
-thing cannot change on a live context, multisampling on the canvas itself, so a
-step down to low mid-session draws straight to an unsampled canvas until the
-next launch, which starts on the remembered tier with the canvas multisampled.
+What follows is a monitor on the frame rate. It ignores the first second and a
+half after any change of tier, since every new program compiles on its first
+draw and those frames say nothing about the device; then it judges windows of
+two seconds by their median, so a lone hitch cannot trip it. A median over
+26 ms — under 38 fps — steps the tier down and remembers it; a median over
+90 ms is a crawl and goes straight to low. It never steps up on its own: a
+device that has proved slow once is slow.
+
+The windows are measured in time, not frames, and that matters. The first
+version counted frames — ninety to warm up, sixty to judge — and on a phone
+crawling at five frames a second that was half a minute before it did
+anything, while frames over a quarter of a second were thrown out as stalls,
+which on the slowest phones was every frame. It could not see the device it
+existed for. One thing cannot change on a live context, multisampling on the
+canvas itself, so a step down to low mid-session draws straight to an
+unsampled canvas until the next launch, which starts on the remembered tier
+with the canvas multisampled.
+
+`?stats` on the URL puts a readout in the corner — the tier and where it came
+from, the frame rate, the monitor's last median, the pixel ratio and the GPU —
+for testing on a phone, where there is no console to read.
 
 `npm run bench` prints the table above for each tier; `--tier low`, `--dpr 2`,
 `--width`, `--height` and `--pool` change what is measured. It uses the same

@@ -236,6 +236,21 @@ body.post-off .vignette {
   display: block;
 }
 
+/* `?stats` on the URL: the tier and frame rate, for testing on a phone. */
+.stats {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 56px);
+  left: 12px;
+  z-index: 100;
+  max-width: calc(100vw - 24px);
+  padding: 4px 7px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #e6e2d8;
+  font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  pointer-events: none;
+}
+
 .reveal-breakdown span b {
   color: var(--ink);
   font-weight: 600;
