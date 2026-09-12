@@ -175,7 +175,12 @@ export interface CoinMaterial {
   ready: Promise<void>;
   setCoin(settings: Partial<CoinSettings>): void;
   getCoin(): CoinSettings;
+  /** How many octaves of procedural weathering the shader runs per pixel. */
+  setDetail(detail: CoinDetail): void;
+  getDetail(): CoinDetail;
 }
+
+export type CoinDetail = 'full' | 'lite';
 
 /**
  * How the wear map is laid out; the asset build writes it to match. It spans this
@@ -269,10 +274,18 @@ float coinNoise(vec3 x) {
   );
 }
 
+// Fewer octaves on a slow GPU: the coin is one of the more expensive things
+// on screen per pixel, and during the reveal it fills a good part of it.
+#ifdef COIN_LITE
+  #define COIN_OCTAVES 2
+#else
+  #define COIN_OCTAVES 4
+#endif
+
 float coinFbm(vec3 p) {
   float amplitude = 0.5;
   float sum = 0.0;
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < COIN_OCTAVES; i++) {
     sum += amplitude * coinNoise(p);
     p = p * 2.03 + vec3(1.7, 9.2, 3.1);
     amplitude *= 0.5;
@@ -299,10 +312,14 @@ vec4 coinDecodeMicro(vec4 texel) {
 // shimmers. 0.5 is neutral; below it thins a mask, above it thickens.
 float coinGrunge(vec3 p, float footprint) {
   float fade20 = 1.0 - smoothstep(0.2, 0.6, footprint * 20.0);
-  float fade55 = 1.0 - smoothstep(0.2, 0.6, footprint * 55.0);
   float ridged20 = 1.0 - abs(2.0 * coinNoise(p * 20.0 + vec3(5.0, 13.0, 2.0)) - 1.0);
-  float ridged55 = 1.0 - abs(2.0 * coinNoise(p * 55.0 + vec3(17.0, 3.0, 8.0)) - 1.0);
-  return 0.5 + 0.4 * (ridged20 - 0.5) * fade20 + 0.35 * (ridged55 - 0.5) * fade55;
+  #ifdef COIN_LITE
+    return 0.5 + 0.4 * (ridged20 - 0.5) * fade20;
+  #else
+    float fade55 = 1.0 - smoothstep(0.2, 0.6, footprint * 55.0);
+    float ridged55 = 1.0 - abs(2.0 * coinNoise(p * 55.0 + vec3(17.0, 3.0, 8.0)) - 1.0);
+    return 0.5 + 0.4 * (ridged20 - 0.5) * fade20 + 0.35 * (ridged55 - 0.5) * fade55;
+  #endif
 }
 
 // Roughness detail, down to the pixel. Four octaves of mottle, each faded out
@@ -313,6 +330,13 @@ float coinGrunge(vec3 p, float footprint) {
 float coinRoughnessDetail(vec3 p, float footprint) {
   float fade26 = 1.0 - smoothstep(0.2, 0.6, footprint * 26.0);
   float fade64 = 1.0 - smoothstep(0.2, 0.6, footprint * 64.0);
+  #ifdef COIN_LITE
+    // The two coarsest octaves only; the finer ones are below a pixel at the
+    // resolution a slow GPU renders at anyway.
+    return 0.1 * (coinFbm(p * 9.0 + vec3(7.0, 5.0, 3.0)) - 0.5)
+      + 0.06 * (coinNoise(p * 26.0 + vec3(2.0, 11.0, 4.0)) - 0.5) * fade26
+      + 0.08 * (coinNoise(p * 64.0 + vec3(6.0, 1.0, 9.0)) - 0.5) * fade64;
+  #endif
   float fade150 = 1.0 - smoothstep(0.2, 0.6, footprint * 150.0);
   return 0.1 * (coinFbm(p * 9.0 + vec3(7.0, 5.0, 3.0)) - 0.5)
     + 0.06 * (coinNoise(p * 26.0 + vec3(2.0, 11.0, 4.0)) - 0.5) * fade26
@@ -524,7 +548,12 @@ reflectedLight.indirectSpecular *= coinOcclusion;
  * is; the asset build bakes the strip to the coin's inradius and its face
  * extent.
  */
-export function createCoinMaterial(settings?: Partial<CoinSettings>, halfThickness = 0.1, radius = 0.63): CoinMaterial {
+export function createCoinMaterial(
+  settings?: Partial<CoinSettings>,
+  halfThickness = 0.1,
+  radius = 0.63,
+  anisotropy = 8,
+): CoinMaterial {
   const coin: CoinSettings = { ...DEFAULT_COIN, ...settings };
   // Clean until the map arrives: a single texel as far from any wall as the map
   // can say.
@@ -565,6 +594,7 @@ export function createCoinMaterial(settings?: Partial<CoinSettings>, halfThickne
   };
   applyMetal();
 
+  let detail: CoinDetail = 'full';
   const material = new THREE.MeshPhysicalMaterial({
     color: 0xffffff,
     metalness: 1,
@@ -592,7 +622,7 @@ export function createCoinMaterial(settings?: Partial<CoinSettings>, halfThickne
   };
   // A key of its own, so three does not hand this material a program cached for
   // an unpatched MeshPhysicalMaterial with the same settings.
-  material.customProgramCacheKey = () => 'coin-ancient-baked';
+  material.customProgramCacheKey = () => `coin-ancient-baked-${detail}`;
 
   const loader = new THREE.TextureLoader();
   const load = (file: string, wrapS: THREE.Wrapping, mipmaps: boolean) =>
@@ -603,7 +633,7 @@ export function createCoinMaterial(settings?: Partial<CoinSettings>, halfThickne
       texture.wrapT = THREE.ClampToEdgeWrapping;
       texture.generateMipmaps = mipmaps;
       texture.minFilter = mipmaps ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter;
-      texture.anisotropy = 8;
+      texture.anisotropy = anisotropy;
       return texture;
     });
   const ready = Promise.all([
@@ -634,5 +664,12 @@ export function createCoinMaterial(settings?: Partial<CoinSettings>, halfThickne
       applyMetal();
     },
     getCoin: () => ({ ...coin }),
+    setDetail(next) {
+      if (next === detail) return;
+      detail = next;
+      material.defines = next === 'lite' ? { COIN_LITE: '' } : {};
+      material.needsUpdate = true;
+    },
+    getDetail: () => detail,
   };
 }

@@ -15,6 +15,17 @@ import { Hud } from './ui/hud';
 import { DiceAudio } from './audio';
 import type { DieType } from './dice/values';
 import { resolveRoll, type ResultMode } from './dice/outcome';
+import {
+  chooseQuality,
+  describeGpu,
+  FrameRateMonitor,
+  lowerTier,
+  QUALITY,
+  rememberTier,
+  type QualityChoice,
+  type QualitySettings,
+  type QualityTier,
+} from './quality';
 
 /**
  * How long the close-up holds after the dice stop before easing back out. Long
@@ -42,6 +53,22 @@ export class App {
   private paused = false;
   private readonly bounds = new THREE.Sphere();
   private readonly audio = new DiceAudio();
+  private quality: QualitySettings;
+  private readonly qualityChoice: QualityChoice;
+  private readonly gpu: string;
+  private readonly monitor = new FrameRateMonitor();
+  /** The key light, whose shadow map a change of tier resizes. */
+  private keyLight!: THREE.DirectionalLight;
+  /**
+   * Frames the shadow map is still redrawn for. The light and the tray never
+   * move, so once the dice have stopped the map cannot change; it is redrawn
+   * only while something is moving, plus a couple of frames after anything is
+   * placed, and cached the rest of the time.
+   */
+  private shadowFramesDue = 2;
+  /** Time carried over from frames the idle throttle skipped. */
+  private skippedDelta = 0;
+  private frameParity = 0;
 
   private rapier!: typeof RAPIER;
   private assets!: DiceAssets;
@@ -73,20 +100,30 @@ export class App {
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
+    // Decided before the context exists: whether the canvas itself needs
+    // multisampling depends on the tier, and that cannot change afterwards.
+    this.gpu = describeGpu();
+    this.qualityChoice = chooseQuality(window.location.search, this.gpu);
+    this.quality = QUALITY[this.qualityChoice.tier];
+    console.info(`quality: ${this.quality.tier} (${this.qualityChoice.reason})`);
     this.renderer = new THREE.WebGLRenderer({
       canvas,
-      // Off deliberately. It only multisamples the default frame buffer, and with
-      // the composer in the chain nothing is ever drawn there — it cost a
-      // multisampled buffer nobody wrote to. The antialiasing that matters is on
-      // the composer's own target, in scene/postfx.ts.
-      antialias: false,
+      // Multisampling on the canvas only helps when the scene is drawn straight
+      // to it, which the lowest tier does. With the composer in the chain nothing
+      // is ever drawn there — it would cost a multisampled buffer nobody wrote to
+      // — and the antialiasing that matters is on the composer's own target, in
+      // scene/postfx.ts.
+      antialias: !this.quality.post,
       powerPreference: 'high-performance',
       stencil: false,
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(this.pixelRatio());
     this.renderer.setSize(window.innerWidth, window.innerHeight, false);
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = this.quality.softShadows ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+    // Redrawn on demand — see shadowFramesDue.
+    this.renderer.shadowMap.autoUpdate = false;
+    this.applyQualityToDocument();
     // GT7's operator, not ACES. See src/scene/tonemap.ts for why, and
     // tools/tonemap-curves.py for the measurement that decided it.
     installGT7ToneMapping();
@@ -116,17 +153,22 @@ export class App {
     const environment = createEnvironment(this.renderer);
     this.scene.environment = environment;
 
-    // A die is one world unit across; a 2048 map over the tray gives it barely two
-    // shadow texels, so spend 4096 where the GPU can afford it.
-    const shadowMapSize = this.renderer.capabilities.maxTextureSize >= 8192 && window.innerWidth > 700 ? 4096 : 2048;
-    for (const light of createLights(TRAY.innerWidth, TRAY.innerDepth, shadowMapSize)) this.scene.add(light);
+    const lights = createLights(TRAY.innerWidth, TRAY.innerDepth, this.shadowMapSize());
+    this.keyLight = lights[0] as THREE.DirectionalLight;
+    for (const light of lights) this.scene.add(light);
 
     const tray = createTray();
     this.scene.add(tray.group);
 
     this.dice = createDiceMaterial();
     this.diceMaterial = this.dice.material;
-    this.coin = createCoinMaterial(undefined, this.assets.info.coin.inradius, this.assets.info.coin.faces[0].extent);
+    this.coin = createCoinMaterial(
+      undefined,
+      this.assets.info.coin.inradius,
+      this.assets.info.coin.faces[0].extent,
+      Math.min(this.quality.anisotropy, this.renderer.capabilities.getMaxAnisotropy()),
+    );
+    this.coin.setDetail(this.quality.coinDetail);
     // Its own room: the plain one shows a flat face nothing but the dark shell.
     this.coin.material.envMap = createEnvironment(this.renderer, true);
     await this.coin.ready;
@@ -135,8 +177,8 @@ export class App {
     this.diceWorld = new DiceWorld(this.rapier, this.assets, this.diceMaterial, this.coin.material);
     this.scene.add(this.diceWorld.group);
 
-    this.postFx = createPostFx(this.renderer, this.scene, this.director.camera);
-    this.postFx.setSize(window.innerWidth, window.innerHeight, Math.min(window.devicePixelRatio, 2));
+    this.postFx = createPostFx(this.renderer, this.scene, this.director.camera, this.quality);
+    this.postFx.setSize(window.innerWidth, window.innerHeight, this.pixelRatio());
 
     this.hud = new Hud({
       onPoolChange: (pool) => this.setPool(pool),
@@ -179,7 +221,10 @@ export class App {
     // The coin changes at once; it has nothing to download. Its voice with it.
     this.coin.setMetal(set.metal);
     this.audio.setCoinMetal(set.metal);
-    const maps = await loadSetTextures(set, this.renderer.capabilities.getMaxAnisotropy());
+    const maps = await loadSetTextures(
+      set,
+      Math.min(this.quality.anisotropy, this.renderer.capabilities.getMaxAnisotropy()),
+    );
 
     // Two quick taps on the colour swatches race each other, and whichever
     // download finishes last would otherwise win regardless of what was clicked
@@ -212,6 +257,52 @@ export class App {
     this.revealing = false;
     this.revealFocus = [];
     this.director.setMode('idle');
+    this.shadowFramesDue = 2;
+  }
+
+  private pixelRatio() {
+    return Math.min(window.devicePixelRatio, this.quality.pixelRatio);
+  }
+
+  private shadowMapSize() {
+    if (this.quality.shadowMap > 0) return this.quality.shadowMap;
+    // A die is one world unit across; a 2048 map over the tray gives it barely
+    // two shadow texels, so spend 4096 where the GPU can afford it.
+    return this.renderer.capabilities.maxTextureSize >= 8192 && window.innerWidth > 700 ? 4096 : 2048;
+  }
+
+  /** The HUD's translucency and the CSS vignette follow the tier. */
+  private applyQualityToDocument() {
+    document.body.dataset.quality = this.quality.tier;
+    document.body.classList.toggle('post-off', !this.quality.post);
+  }
+
+  /**
+   * Moves to another tier while running. Everything the tier touches is
+   * re-applied; what cannot change on a live context — multisampling on the
+   * canvas itself — is left as it was, so a step down to the lowest tier on a
+   * context created for the post chain draws straight to an unsampled canvas
+   * until the next launch, which starts on the remembered tier.
+   */
+  private applyQuality(tier: QualityTier, remember: boolean) {
+    if (tier === this.quality.tier) return;
+    this.quality = QUALITY[tier];
+    console.info(`quality: ${tier}`);
+    if (remember) rememberTier(tier);
+    this.monitor.reset();
+    this.applyQualityToDocument();
+
+    this.renderer.shadowMap.type = this.quality.softShadows ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+    const size = this.shadowMapSize();
+    if (this.keyLight && this.keyLight.shadow.mapSize.x !== size) {
+      this.keyLight.shadow.mapSize.set(size, size);
+      this.keyLight.shadow.map?.dispose();
+      this.keyLight.shadow.map = null;
+    }
+    this.shadowFramesDue = 2;
+    this.coin?.setDetail(this.quality.coinDetail);
+    this.postFx?.configure(this.quality);
+    this.handleResize();
   }
 
   private rollFromButton() {
@@ -226,6 +317,7 @@ export class App {
   private throwDice(direction: THREE.Vector2, power: number) {
     if (this.diceWorld.dice.length === 0) return;
     this.diceWorld.roll(direction, power);
+    this.shadowFramesDue = 2;
     this.revealing = false;
     this.revealFocus = [];
     this.revealTimer = 0;
@@ -240,15 +332,46 @@ export class App {
     // as repeatable as the throw. Pinning the solver alone was not enough: the
     // same seed put the dice in the same place but framed them from slightly
     // different ones, because the frames in between were still wall-clock.
-    const delta = this.diceWorld.seeded
-      ? SEEDED_FRAME
-      : Math.min(this.clock.getDelta(), 0.05);
+    const measured = this.clock.getDelta();
+    const frame = this.diceWorld.seeded ? SEEDED_FRAME : Math.min(measured, 0.05);
     // Held still so a tool can pose the scene by hand and render single frames.
     // Motion blur is a function of where things were drawn last frame, so
     // measuring it needs the frames under test to be the only ones happening.
     if (this.paused) return;
 
+    // A device that cannot keep up is moved down a tier. Not while a tool has
+    // pinned the tier, and not for a seeded run, which is timed by the frame
+    // count rather than the clock.
+    if (
+      !this.qualityChoice.pinned &&
+      !this.diceWorld.seeded &&
+      !document.hidden &&
+      this.quality.tier !== 'low' &&
+      this.monitor.sample(measured * 1000)
+    ) {
+      this.applyQuality(lowerTier(this.quality.tier), true);
+    }
+
+    // While nothing moves, the lowest tier draws every other frame. The time
+    // is carried, so the camera's drift covers the same ground.
+    const delta = frame + this.skippedDelta;
+    this.skippedDelta = 0;
+    if (
+      this.quality.idleFrameSkip > 0 &&
+      !this.diceWorld.seeded &&
+      !this.diceWorld.isRolling &&
+      this.diceWorld.allSettled
+    ) {
+      this.frameParity = (this.frameParity + 1) % (this.quality.idleFrameSkip + 1);
+      if (this.frameParity !== 0) {
+        this.skippedDelta = delta;
+        return;
+      }
+    }
+
+    const stepStarted = performance.now();
     const { impacts, justSettled } = this.diceWorld.step(delta);
+    this.recordStepTime(performance.now() - stepStarted);
     for (const impact of impacts) {
       this.audio.impact(impact.strength, impact.pan, impact.surface, impact.radius, impact.when, impact.metal);
     }
@@ -270,8 +393,21 @@ export class App {
     // is soften the numerals, which are the one thing on screen that has to be
     // legible.
     this.postFx.setMotionBlur(1 - this.director.revealProgress);
+    // And skipped altogether, velocity pass included, while the dice are at
+    // rest: the only motion then is the camera's slow drift, whose smear is
+    // under a pixel — the pass was reading the whole frame to leave it alone.
+    this.postFx.setMoving(this.diceWorld.isRolling);
+    this.renderer.shadowMap.needsUpdate = this.shadowFramesDue > 0 || !this.diceWorld.allSettled;
+    if (this.shadowFramesDue > 0) this.shadowFramesDue--;
     this.postFx.render(delta);
   };
+
+  /** Solver time per frame over the last few seconds, for the benchmark. */
+  private readonly stepTimes: number[] = [];
+  private recordStepTime(ms: number) {
+    this.stepTimes.push(ms);
+    if (this.stepTimes.length > 600) this.stepTimes.shift();
+  }
 
   /** Puts the result away and lets the camera drift back. */
   private dismissReveal() {
@@ -308,6 +444,8 @@ export class App {
     this.revealing = true;
     this.revealTimer = 0;
     this.director.setMode('reveal');
+    // The final pose, once the solver has stopped touching it.
+    this.shadowFramesDue = 2;
   }
 
   /**
@@ -328,7 +466,12 @@ export class App {
       setBloom: (strength: number, radius: number, threshold: number) =>
         this.postFx.setBloom(strength, radius, threshold),
       setGrain: (amount: number) => this.postFx.setGrain(amount),
-      setMotionBlur: (amount: number) => this.postFx.setMotionBlur(amount),
+      setMotionBlur: (amount: number) => {
+        this.postFx.setMotionBlur(amount);
+        this.postFx.setMoving(amount > 0);
+      },
+      quality: () => ({ ...this.quality, reason: this.qualityChoice.reason, pinned: this.qualityChoice.pinned, gpu: this.gpu }),
+      setQuality: (tier: QualityTier) => this.applyQuality(tier, false),
       samplesReport: () => this.postFx.samplesReport(),
       readVelocity: () => this.postFx.readVelocity(),
       shutter: () => this.postFx.shutter(),
@@ -339,6 +482,31 @@ export class App {
         this.paused = paused;
       },
       renderFrame: (delta = 1 / 60) => this.postFx.render(delta),
+      /**
+       * Times one frame stage by stage, GPU drained between them, with the
+       * shadow map's share separated out by rendering the scene pass twice:
+       * once against the cached map and once forced to redraw it.
+       */
+      profileFrame: (delta = 1 / 60) => {
+        const renderer = this.renderer;
+        const auto = renderer.shadowMap.autoUpdate;
+        renderer.shadowMap.autoUpdate = false;
+        const cached = this.postFx.profileFrame(delta);
+        renderer.shadowMap.autoUpdate = true;
+        renderer.shadowMap.needsUpdate = true;
+        const fresh = this.postFx.profileFrame(delta);
+        renderer.shadowMap.autoUpdate = auto;
+        // Whichever stage drew the scene carries the shadow map's cost.
+        const scenePass = fresh.stages.Direct !== undefined ? 'Direct' : 'RenderPass';
+        const shadow = Math.max(0, (fresh.stages[scenePass] ?? 0) - (cached.stages[scenePass] ?? 0));
+        return {
+          stages: { ...fresh.stages, [scenePass]: (fresh.stages[scenePass] ?? 0) - shadow, ShadowMap: shadow },
+          calls: fresh.calls,
+          triangles: fresh.triangles,
+        };
+      },
+      setCoinDetail: (detail: 'full' | 'lite') => this.coin.setDetail(detail),
+      stepTimes: () => this.stepTimes.slice(),
       diceMeshes: () => this.diceWorld.dice.map((die) => die.mesh),
       wallDistance: (y: number, dx: number, dz: number) => this.diceWorld.wallDistance(y, dx, dz),
       roll: (x: number, z: number, power: number) => this.throwDice(new THREE.Vector2(x, z), power),
@@ -372,7 +540,7 @@ export class App {
   private handleResize = () => {
     const width = window.innerWidth;
     const height = window.innerHeight;
-    const pixelRatio = Math.min(window.devicePixelRatio, 2);
+    const pixelRatio = this.pixelRatio();
     this.renderer.setPixelRatio(pixelRatio);
     this.renderer.setSize(width, height, false);
     this.director.setAspect(width / height);

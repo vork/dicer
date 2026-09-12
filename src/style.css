@@ -199,6 +199,43 @@ body {
   backdrop-filter: blur(6px);
 }
 
+/*
+ * Blurring the scene behind the HUD costs the compositor a blur of that part
+ * of the canvas on every frame, which on an older phone is a measurable share
+ * of the frame. Below the top quality tier the panels go a little more opaque
+ * instead. The vignette overlay stands in for the grade pass on the lowest
+ * tier, where the scene is drawn straight to the canvas.
+ */
+body[data-quality='medium'] *,
+body[data-quality='low'] * {
+  backdrop-filter: none !important;
+}
+
+body[data-quality='medium'],
+body[data-quality='low'] {
+  --panel: rgba(12, 12, 16, 0.82);
+}
+
+.vignette {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  display: none;
+  pointer-events: none;
+  background: radial-gradient(
+    circle farthest-corner at 50% 50%,
+    rgba(5, 5, 7, 0) 0%,
+    rgba(5, 5, 7, 0.12) 30%,
+    rgba(5, 5, 7, 0.34) 50%,
+    rgba(5, 5, 7, 0.7) 78%,
+    rgba(5, 5, 7, 0.94) 100%
+  );
+}
+
+body.post-off .vignette {
+  display: block;
+}
+
 .reveal-breakdown span b {
   color: var(--ink);
   font-weight: 600;

@@ -690,6 +690,112 @@ measures them; averaged over six impacts each:
 | electrum | 5.1 kHz | 53 ms | −8.5 dB |
 | rose gold | 4.8 kHz | 33 ms | −10.8 dB |
 
+## Quality tiers
+
+The app was one pipeline for every GPU: a 4x multisampled half-float frame at
+twice the CSS resolution, drawn twice (once for velocity), then blurred,
+bloomed, tone mapped and graded in four more full-screen passes. On a desktop or
+a recent phone that is fine. On an older phone it was a slideshow, because every
+one of those passes is paid per pixel and a 3x phone has a great many pixels —
+a 390-point-wide screen is 780 pixels across at the pixel ratio cap of 2, and
+1170 at its native 3.
+
+`tools/bench.mjs` says where the time goes. It runs the real app headlessly on
+a phone-sized canvas at 3x, drains the GPU after every stage of a frame, and
+times each. It runs on a software rasteriser, so the milliseconds are nothing
+like a phone's — but a software rasteriser is bound by the same things a weak
+mobile GPU is, fill and shader work per pixel, so the shares and the ratios
+carry over. A rolling frame, before any of this, on a 780×1688 canvas:
+
+| stage | ms | share |
+| --- | ---: | ---: |
+| scene (MSAA 4x, half float) | 768 | 53% |
+| motion blur (11 taps + 12-sample search) | 269 | 19% |
+| tone mapping (`OutputPass`) | 187 | 13% |
+| bloom | 125 | 9% |
+| grade | 38 | 3% |
+| velocity pass | 30 | 2% |
+| shadow map | 27 | 2% |
+| Rapier, per frame | 0.5 | — |
+
+The solver is not the problem, so it was left exactly as tuned. Everything
+else is, and it is all proportional to pixel count, so pixel ratio is the first
+lever and the post chain the second. Three things changed for every tier:
+
+- **The tone-mapping pass is gone.** The grade now does what `OutputPass` did
+  — GT7 and the sRGB transfer — itself, which saves a full-screen pass and the
+  half-float buffer it wrote. The one difference is that the chromatic
+  aberration now shifts the linear frame and tone maps once rather than tone
+  mapping three separately shifted pixels; the fringes are two pixels wide at
+  the corners and the difference is not visible.
+- **The shadow map is drawn only while something moves.** The light and the
+  tray never move, so once the dice have stopped the map cannot change. It is
+  redrawn while the dice are rolling and for two frames after anything is
+  placed, and cached the rest of the time.
+- **Motion blur is skipped, velocity pass and all, while the dice are at
+  rest.** The only motion then is the camera's slow drift, whose smear is under
+  a pixel: the pass was reading the whole frame, and a second copy of the
+  scene, to leave it alone.
+
+Then three tiers, in `src/quality.ts`:
+
+| | high | medium | low |
+| --- | --- | --- | --- |
+| pixel ratio, at most | 2 | 1.5 | 1 |
+| scene buffer | MSAA 4x, half float | MSAA 4x, half float | drawn straight to the canvas |
+| motion blur | 11 taps, 12-sample search | 7 taps, 8-sample search | off |
+| bloom | at CSS resolution | at half CSS resolution | off |
+| chromatic aberration | yes | no | no |
+| shadow map | 4096 on a large screen, else 2048, soft PCF | 2048, PCF | 1024, PCF |
+| anisotropic filtering | 16 | 4 | 2 |
+| coin weathering | four octaves | four octaves | two, and no sub-pixel terms |
+| blur behind the HUD | yes | no | no |
+| idle frames | every frame | every frame | every other frame |
+
+Low has no post chain at all. The scene is drawn straight to the canvas, with
+tone mapping in the materials the way three does when there is no composer,
+multisampling on the canvas itself, and a CSS radial gradient standing in for
+the grade's vignette. It loses the grain, the split tone and the bloom, which
+is the right trade on a phone that could not draw the frame at all. The
+blur behind the HUD is a compositor cost of its own — a blur of that part of
+the canvas every frame — so below the top tier the panels are a little more
+opaque instead.
+
+The same rolling frame, after:
+
+| tier | rolling | settled | of the original |
+| --- | ---: | ---: | ---: |
+| high | 1246 ms | 843 ms | 86% / 58% |
+| medium | 697 ms | 506 ms | 48% / 35% |
+| low | 255 ms | 228 ms | 18% / 16%, and half the idle frames |
+
+A device lands on a tier three ways. `?quality=high`, `medium` or `low` on the
+URL pins it, for comparing them on one phone. Otherwise a tier remembered in
+`localStorage` from an earlier session is used. Otherwise the GPU's name is
+read from a throwaway context: a short list of the clearly weak (Mali-4xx and
+T-series, the small Mali-G parts, Adreno 3xx–5xx and the low 6xx, PowerVR)
+starts on low, a touch device with four cores or three gigabytes starts on
+low, a modest desktop part starts on medium, and everything else on high.
+The list is deliberately short — a device it misses starts a tier too high and
+is caught by what follows, whereas one it catches wrongly is stuck looking
+worse than it should.
+
+What follows is a monitor on the frame rate. It ignores the first ninety
+frames after any change of tier, since every new program compiles on its
+first draw and those frames say nothing about the device; then it judges
+windows of sixty frames by their median, so a lone hitch cannot trip it, and a
+median over 26 ms — under 38 fps — steps the tier down and remembers it. It
+never steps up on its own: a device that has proved slow once is slow. One
+thing cannot change on a live context, multisampling on the canvas itself, so a
+step down to low mid-session draws straight to an unsampled canvas until the
+next launch, which starts on the remembered tier with the canvas multisampled.
+
+`npm run bench` prints the table above for each tier; `--tier low`, `--dpr 2`,
+`--width`, `--height` and `--pool` change what is measured. It uses the same
+`window.dicer.debug` hooks as the other tools: `profileFrame()` for the
+drained stage times, `quality()` for the tier in effect and where it came from,
+`setQuality(tier)` to switch live, `stepTimes()` for the solver.
+
 ## Antialiasing
 
 There was none, and everything said there was. The renderer was built with
@@ -706,8 +812,9 @@ a single pixel.
 clones it for the second buffer carrying `samples` across, so the fix is to hand it
 one with `samples: 4`. Only the geometry pass needs it — bloom, the blur and the
 grade all run on the resolved texture afterwards. `antialias` on the renderer is
-now explicitly off, since it can only ever have applied to a surface this app does
-not draw to.
+off whenever the composer is in the chain, since it can only ever have applied to
+a surface this app does not then draw to; the low quality tier, which draws
+straight to the canvas, is the one case where it is on.
 
 `npm run verify:aa` checks the buffers the scene is actually drawn into, and asks
 not just what they are configured for but whether a multisampled frame buffer was
@@ -1321,6 +1428,7 @@ pose, not the antialiasing.
 | `npm run verify:aa` | the buffers the scene is drawn into are really multisampled |
 | `npm run verify:build` | rebuilds, then runs the built site from a sub-path with no 404s |
 | `npm run verify:pwa` | rebuilds, then boots the installed app with the network cut |
+| `npm run bench` | where a frame's time goes, stage by stage, per quality tier, on a phone-sized canvas |
 | `npm run calibrate` | regenerate the face contact sheets |
 | `npm run coin:faces` | contact sheet of the coin's two faces, and its normals with `--normals` |
 | `npm run coin:look` | the coin under the app's lighting in seconds, any shader channel with `--debug`, any metal with `--metal` |
