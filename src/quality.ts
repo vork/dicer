@@ -123,6 +123,24 @@ export const QUALITY: Record<QualityTier, QualitySettings> = {
 };
 
 const STORAGE_KEY = 'dicer.quality';
+/**
+ * Bumped whenever the way a tier is chosen changes, so that a tier or a ceiling
+ * remembered under the old rules is thrown away rather than trusted. Version 1
+ * sent every iPhone to low on a core count Safari caps at four.
+ */
+const STORAGE_VERSION = '2';
+const VERSION_KEY = 'dicer.quality.version';
+
+function forgetStaleChoices() {
+  try {
+    if (localStorage.getItem(VERSION_KEY) === STORAGE_VERSION) return;
+    localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem('dicer.quality.ceiling');
+    localStorage.setItem(VERSION_KEY, STORAGE_VERSION);
+  } catch {
+    // Nothing stored, nothing stale.
+  }
+}
 
 export function isQualityTier(value: unknown): value is QualityTier {
   return typeof value === 'string' && (QUALITY_TIERS as readonly string[]).includes(value);
@@ -164,6 +182,7 @@ export function rememberCeiling(tier: QualityTier) {
 }
 
 export function rememberedCeiling(): QualityTier {
+  forgetStaleChoices();
   try {
     const stored = JSON.parse(localStorage.getItem(CEILING_KEY) ?? 'null') as { tier?: unknown; at?: unknown } | null;
     if (!stored || !isQualityTier(stored.tier) || typeof stored.at !== 'number') return 'high';
@@ -184,6 +203,7 @@ export function rememberTier(tier: QualityTier | null) {
 }
 
 function rememberedTier(): QualityTier | null {
+  forgetStaleChoices();
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     return isQualityTier(stored) ? stored : null;
@@ -237,15 +257,16 @@ export function chooseQuality(search = window.location.search, gpu = describeGpu
   const remembered = rememberedTier();
   if (remembered) return { tier: remembered, reason: 'remembered', pinned: false };
 
+  // Only signals that mean something. The core count is not one: Safari caps
+  // navigator.hardwareConcurrency at four on every iPhone against
+  // fingerprinting, so a rule on it sent an iPhone 17 Pro to the lowest tier.
+  // deviceMemory is Chrome's alone and reports what it says.
   const nav = navigator as Navigator & { deviceMemory?: number };
   const touch = window.matchMedia('(pointer: coarse)').matches || nav.maxTouchPoints > 0;
-  const cores = nav.hardwareConcurrency ?? 0;
   const memory = nav.deviceMemory ?? 0;
 
   if (WEAK_GPU.test(gpu)) return { tier: 'low', reason: `gpu ${gpu}`, pinned: false };
-  if (touch && ((cores > 0 && cores <= 4) || (memory > 0 && memory <= 3))) {
-    return { tier: 'low', reason: `${cores} cores, ${memory || '?'} GB`, pinned: false };
-  }
+  if (touch && memory > 0 && memory <= 3) return { tier: 'low', reason: `${memory} GB`, pinned: false };
   if (MODEST_GPU.test(gpu)) return { tier: 'medium', reason: `gpu ${gpu}`, pinned: false };
   if (touch && memory > 0 && memory <= 4) return { tier: 'medium', reason: `${memory} GB`, pinned: false };
   return { tier: 'high', reason: gpu ? `gpu ${gpu}` : 'default', pinned: false };

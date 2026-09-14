@@ -783,8 +783,13 @@ URL pins it, for comparing them on one phone. Otherwise a tier remembered in
 `localStorage` from an earlier session is used. Otherwise the GPU's name is
 read from a throwaway context: a short list of the clearly weak (Mali-4xx and
 T-series, the small Mali-G parts, Adreno 3xx–5xx and the low 6xx, PowerVR)
-starts on low, a touch device with four cores or three gigabytes starts on
-low, a modest desktop part starts on medium, and everything else on high.
+starts on low, a touch device with three gigabytes or fewer (Chrome reports
+this; Safari does not) starts on low, a modest desktop part starts on medium,
+and everything else on high. The core count is deliberately not consulted:
+Safari caps `navigator.hardwareConcurrency` at four on every iPhone against
+fingerprinting, and a rule on it sent an iPhone 17 Pro straight to the lowest
+tier. A version stamp on the stored choices throws away anything remembered
+under the old rules.
 The list is deliberately short — a device it misses starts a tier too high and
 is caught by what follows, whereas one it catches wrongly is stuck looking
 worse than it should.
