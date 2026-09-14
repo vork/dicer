@@ -766,9 +766,39 @@ The same rolling frame, after:
 
 | tier | rolling | settled | of the original |
 | --- | ---: | ---: | ---: |
-| high | 1291 ms | 942 ms | 89% / 65% |
-| medium | 721 ms | 560 ms | 50% / 39% |
-| low | 185 ms | 178 ms | 13% / 12%, and half the idle frames |
+| high | 1105 ms | 888 ms | 77% / 64% |
+| medium | 664 ms | 530 ms | 46% / 38% |
+| low | 161 ms | 144 ms | 11% / 10%, and half the idle frames |
+
+A second round profiled the high tier by hiding one object at a time and
+measuring each change against a baseline frame, pixel by pixel, so only what
+the eye cannot see was kept:
+
+- **The motion blur reads a tile of largest velocities first.** During a throw
+  the dice cover a small part of the frame and the rest is still, yet the blur
+  was searching twelve neighbours and averaging eleven taps on every pixel of
+  it. Two tiny passes now record the largest velocity per tile of the velocity
+  buffer and per 3×3 neighbourhood of tiles, a tile being as wide as the
+  search reach; the blur reads that in one tap and, where nothing within reach
+  moved as much as a pixel, stops there. The picture is identical — the
+  blur's own early-out would have fired after the search — and `verify:blur`
+  agrees. The pass fell from 271 ms to 163 ms with four dice in the air, and
+  costs almost nothing once they land.
+- **The ground and the pedestal no longer look up the shadow map.** Both are
+  nearly black, and the wall's shadow on them measured a mean difference of
+  0.03 levels across the frame, for 4% of the scene pass.
+- **The pedestal has no top face.** It sits under the floor and the walls,
+  never seen, and a GPU without early depth rejection shaded all of it before
+  throwing it away; drawing the pedestal last changed nothing, so the face is
+  simply not there.
+
+What the round also found and left alone: the ground is 44% of the scene
+pass purely by area — its normal map, environment lookup and shadow taps run
+on more pixels than anything else — but a cheaper material on it is visible
+on the high tier (a Lambert ground differs on 18% of the frame); the felt's
+sheen and the leather's clear coat are visible; and bloom, the blur's tap
+count and the aberration made no measurable difference to a throw's frame
+but do to a glint or a long smear, so they stay as the tiers set them.
 
 The low tier's scene pass was probed further, one thing at a time. Hiding the
 ground plane halved it: nearly black, but it fills more of the frame than

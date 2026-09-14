@@ -196,11 +196,19 @@ export function createTray(): Tray {
     'below',
   );
   baseGeometry.translate(0, TRAY.floorY - 0.06, 0);
+  // Its top face is under the floor and the walls, never seen, and a GPU with
+  // no early depth rejection shades all of it before throwing it away: hiding
+  // the whole pedestal took 15% off the scene pass on tools/bench.mjs, and
+  // drawing it last changed nothing. So the face is simply not there.
+  dropTopFace(baseGeometry);
   const base = new THREE.Mesh(
     baseGeometry,
     new THREE.MeshPhysicalMaterial({ color: 0x0c0d11, roughness: 0.55, metalness: 0.2, envMapIntensity: 0.5 }),
   );
-  base.receiveShadow = true;
+  // No shadow lookups on the pedestal or the ground. Both are nearly black, and
+  // the wall's shadow on them measured invisible — a mean difference of 0.03
+  // levels — for 4% of the scene pass on tools/bench.mjs.
+  base.receiveShadow = false;
   group.add(base);
 
   // --- ground the tray on something, so it is not floating in a void --------
@@ -219,7 +227,7 @@ export function createTray(): Tray {
   const ground = new THREE.Mesh<THREE.BufferGeometry, THREE.Material>(new THREE.CircleGeometry(70, 64), groundMaterial);
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = TRAY.floorY - 0.78;
-  ground.receiveShadow = true;
+  ground.receiveShadow = false;
   group.add(ground);
 
   const fullSheen = floorMaterial.sheen;
@@ -250,6 +258,30 @@ export function createTray(): Tray {
       leather.roughnessMap.dispose();
     },
   };
+}
+
+/**
+ * Removes the triangles that make up a solid's flat top: every face whose
+ * three normals point straight up and whose vertices all sit at the highest y.
+ * The bevel around the top is kept; only the cap goes.
+ */
+function dropTopFace(geometry: THREE.BufferGeometry) {
+  const position = geometry.attributes.position as THREE.BufferAttribute;
+  const normal = geometry.attributes.normal as THREE.BufferAttribute;
+  let top = -Infinity;
+  for (let i = 0; i < position.count; i++) top = Math.max(top, position.getY(i));
+  const onTop = (i: number) => normal.getY(i) > 0.999 && position.getY(i) > top - 1e-4;
+  const kept: number[] = [];
+  const index = geometry.index;
+  const triangles = index ? index.count / 3 : position.count / 3;
+  for (let t = 0; t < triangles; t++) {
+    const a = index ? index.getX(t * 3) : t * 3;
+    const b = index ? index.getX(t * 3 + 1) : t * 3 + 1;
+    const c = index ? index.getX(t * 3 + 2) : t * 3 + 2;
+    if (onTop(a) && onTop(b) && onTop(c)) continue;
+    kept.push(a, b, c);
+  }
+  geometry.setIndex(kept);
 }
 
 /** Planar UVs picked per-triangle from the dominant normal axis. */

@@ -3,6 +3,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 
 /**
  * Final grade: tone mapping and the output transfer, then in display space a
@@ -172,6 +173,89 @@ const VelocityShader = {
 };
 
 /**
+ * The largest velocity in each tile of the velocity buffer, then the largest in
+ * each tile's 3x3 neighbourhood. The blur reads the second to learn, in one tap,
+ * whether anything within its search reach moved at all — and almost nothing
+ * does: during a throw the dice cover a small part of the frame and the rest
+ * is still, yet the blur was searching twelve neighbours and averaging eleven
+ * taps on every pixel of it. Measured on tools/bench.mjs, the blur was 21% of a
+ * rolling frame on the high tier.
+ *
+ * A tile is as wide as the search reach, so any velocity that could claim a
+ * pixel is in that pixel's tile or one next to it. Where the neighbourhood's
+ * largest smear is under a pixel the blur's own early-out would have fired
+ * after the search anyway, so the picture is the same.
+ */
+const TileMaxShader = {
+  uniforms: {
+    tVelocity: { value: null as THREE.Texture | null },
+    /** Tile size in velocity texels. */
+    uTile: { value: 8 },
+    uVelocitySize: { value: new THREE.Vector2(1, 1) },
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tVelocity;
+    uniform int uTile;
+    uniform vec2 uVelocitySize;
+    varying vec2 vUv;
+    void main() {
+      vec2 origin = floor(vUv * (uVelocitySize / float(uTile))) * float(uTile);
+      vec2 best = vec2(0.0);
+      float most = 0.0;
+      for (int y = 0; y < 64; y++) {
+        if (y >= uTile) break;
+        for (int x = 0; x < 64; x++) {
+          if (x >= uTile) break;
+          vec2 texel = (origin + vec2(float(x), float(y)) + 0.5) / uVelocitySize;
+          vec2 v = texture2D(tVelocity, texel).xy;
+          float m = dot(v, v);
+          if (m > most) {
+            most = m;
+            best = v;
+          }
+        }
+      }
+      gl_FragColor = vec4(best, 0.0, 1.0);
+    }
+  `,
+};
+
+const NeighbourMaxShader = {
+  uniforms: {
+    tTiles: { value: null as THREE.Texture | null },
+    uTilesSize: { value: new THREE.Vector2(1, 1) },
+  },
+  vertexShader: TileMaxShader.vertexShader,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tTiles;
+    uniform vec2 uTilesSize;
+    varying vec2 vUv;
+    void main() {
+      vec2 best = vec2(0.0);
+      float most = 0.0;
+      for (int y = -1; y <= 1; y++) {
+        for (int x = -1; x <= 1; x++) {
+          vec2 v = texture2D(tTiles, vUv + vec2(float(x), float(y)) / uTilesSize).xy;
+          float m = dot(v, v);
+          if (m > most) {
+            most = m;
+            best = v;
+          }
+        }
+      }
+      gl_FragColor = vec4(best, 0.0, 1.0);
+    }
+  `,
+};
+
+/**
  * Motion blur: for each pixel, average the frame along the direction that pixel
  * moved, over the length it travelled while the shutter was open.
  *
@@ -183,6 +267,8 @@ const MotionBlurShader = {
   uniforms: {
     tDiffuse: { value: null as THREE.Texture | null },
     tVelocity: { value: null as THREE.Texture | null },
+    /** The largest velocity within reach of each pixel — see TileMaxShader. */
+    tNeighbourMax: { value: null as THREE.Texture | null },
     uResolution: { value: new THREE.Vector2(1, 1) },
     /**
      * How much of the frame interval the shutter is open. Set per frame from how
@@ -204,6 +290,7 @@ const MotionBlurShader = {
   fragmentShader: /* glsl */ `
     uniform sampler2D tDiffuse;
     uniform sampler2D tVelocity;
+    uniform sampler2D tNeighbourMax;
     uniform vec2 uResolution;
     uniform float uShutter;
     uniform float uMaxPixels;
@@ -238,6 +325,12 @@ const MotionBlurShader = {
       // covers the distance, which is what keeps the reach from dragging a fast
       // die's velocity onto scenery it never passed over.
       float open = uShutter * uAmount;
+      // Nothing within reach moved as much as a pixel: the search below could
+      // find nothing, and the early-out after it would fire. One tap instead.
+      if (length(texture2D(tNeighbourMax, vUv).xy * uResolution) * open < 0.75) {
+        gl_FragColor = here;
+        return;
+      }
       vec2 velocity = texture2D(tVelocity, vUv).xy;
       float longest = length(velocity * uResolution) * open;
       float reach = uMaxPixels * 0.5;
@@ -459,9 +552,36 @@ const SHUTTER = {
     };
   };
 
+  // The tile buffers, nearest-filtered: a tile's value is one velocity, and a
+  // blend of two neighbouring tiles would be a velocity nothing has.
+  const tileOptions = {
+    type: THREE.HalfFloatType,
+    format: THREE.RGBAFormat,
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
+    depthBuffer: false,
+  };
+  const tileTarget = new THREE.WebGLRenderTarget(1, 1, tileOptions);
+  const neighbourTarget = new THREE.WebGLRenderTarget(1, 1, tileOptions);
+  const tileMaterial = new THREE.ShaderMaterial({
+    uniforms: THREE.UniformsUtils.clone(TileMaxShader.uniforms),
+    vertexShader: TileMaxShader.vertexShader,
+    fragmentShader: TileMaxShader.fragmentShader,
+  });
+  tileMaterial.uniforms.tVelocity.value = velocityTarget.texture;
+  const neighbourMaterial = new THREE.ShaderMaterial({
+    uniforms: THREE.UniformsUtils.clone(NeighbourMaxShader.uniforms),
+    vertexShader: NeighbourMaxShader.vertexShader,
+    fragmentShader: NeighbourMaxShader.fragmentShader,
+  });
+  neighbourMaterial.uniforms.tTiles.value = tileTarget.texture;
+  const tileQuad = new FullScreenQuad(tileMaterial);
+  const neighbourQuad = new FullScreenQuad(neighbourMaterial);
+
   const motionBlur = new ShaderPass(MotionBlurShader);
   (motionBlur as { name?: string }).name = 'MotionBlur';
   motionBlur.uniforms.tVelocity.value = velocityTarget.texture;
+  motionBlur.uniforms.tNeighbourMax.value = neighbourTarget.texture;
   motionBlur.material.defines = { TAPS: options.blurTaps, SEARCH: options.blurSearch };
   composer.addPass(motionBlur);
   let moving = true;
@@ -564,13 +684,19 @@ const SHUTTER = {
         renderer.setClearColor(0x000000, 0);
         renderer.clear(true, true, false);
         renderer.render(scene, camera);
-        renderer.setRenderTarget(previousTarget);
         renderer.setClearColor(clearColour, clearAlpha);
         scene.overrideMaterial = null;
         renderer.shadowMap.autoUpdate = shadowsAuto;
         renderer.shadowMap.needsUpdate = shadowsDue;
         scene.background = background;
         mark?.('velocity');
+        // Then the tiles: the largest velocity per tile, then per neighbourhood.
+        renderer.setRenderTarget(tileTarget);
+        tileQuad.render(renderer);
+        renderer.setRenderTarget(neighbourTarget);
+        neighbourQuad.render(renderer);
+        renderer.setRenderTarget(previousTarget);
+        mark?.('tiles');
       }
 
       composer.render(delta);
@@ -589,11 +715,24 @@ const SHUTTER = {
       grade.uniforms.uAspect.value = width / height;
       grade.uniforms.uResolution.value.set(width, height);
       const pixels = new THREE.Vector2(width * pixelRatio, height * pixelRatio);
-      velocityTarget.setSize(Math.max(1, Math.round(pixels.x / 2)), Math.max(1, Math.round(pixels.y / 2)));
+      const velocityWidth = Math.max(1, Math.round(pixels.x / 2));
+      const velocityHeight = Math.max(1, Math.round(pixels.y / 2));
+      velocityTarget.setSize(velocityWidth, velocityHeight);
       motionBlur.uniforms.uResolution.value.copy(pixels);
       // A ceiling set as a share of the frame rather than a pixel count, so the
       // longest smear is the same gesture on a phone as on a desktop.
-      motionBlur.uniforms.uMaxPixels.value = pixels.y * 0.05;
+      const maxPixels = pixels.y * 0.05;
+      motionBlur.uniforms.uMaxPixels.value = maxPixels;
+      // The search reaches half the longest smear, in frame pixels; the velocity
+      // buffer is at half resolution, so a tile that wide is a quarter of it.
+      const tile = Math.max(1, Math.min(64, Math.ceil(maxPixels / 4)));
+      tileMaterial.uniforms.uTile.value = tile;
+      tileMaterial.uniforms.uVelocitySize.value.set(velocityWidth, velocityHeight);
+      const tilesWidth = Math.ceil(velocityWidth / tile);
+      const tilesHeight = Math.ceil(velocityHeight / tile);
+      tileTarget.setSize(tilesWidth, tilesHeight);
+      neighbourTarget.setSize(tilesWidth, tilesHeight);
+      neighbourMaterial.uniforms.uTilesSize.value.set(tilesWidth, tilesHeight);
     },
     render(delta) {
       renderStages(delta);
@@ -717,6 +856,12 @@ const SHUTTER = {
       multisampled.dispose();
       velocityTarget.dispose();
       velocityMaterial.dispose();
+      tileTarget.dispose();
+      neighbourTarget.dispose();
+      tileMaterial.dispose();
+      neighbourMaterial.dispose();
+      tileQuad.dispose();
+      neighbourQuad.dispose();
       composer.dispose();
     },
   };
