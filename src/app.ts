@@ -6,7 +6,7 @@ import { createEnvironment, createLights } from './scene/environment';
 import { createTray, TRAY, type Tray } from './scene/tray';
 import { createDiceMaterial, type DiceMaterial, type FlakeSettings } from './scene/dice-material';
 import { createCoinMaterial, type CoinMaterial, type CoinSettings } from './scene/coin-material';
-import { createPostFx, type PostFx } from './scene/postfx';
+import { createPostFx, type PostFx, type PostFxOptions } from './scene/postfx';
 import { installGT7ToneMapping } from './scene/tonemap';
 import { DiceWorld, SEEDED_FRAME } from './physics/dice-world';
 import { CameraDirector } from './camera-director';
@@ -585,6 +585,8 @@ export class App {
         };
       },
       setCoinDetail: (detail: 'full' | 'lite') => this.coin.setDetail(detail),
+      configurePost: (options: Partial<PostFxOptions>) => this.postFx.configure(options),
+      postOptions: () => this.postFx.options(),
       stepTimes: () => this.stepTimes.slice(),
       diceMeshes: () => this.diceWorld.dice.map((die) => die.mesh),
       wallDistance: (y: number, dx: number, dz: number) => this.diceWorld.wallDistance(y, dx, dz),
