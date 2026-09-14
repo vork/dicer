@@ -794,8 +794,20 @@ half after any change of tier, since every new program compiles on its first
 draw and those frames say nothing about the device; then it judges windows of
 two seconds by their median, so a lone hitch cannot trip it. A median over
 26 ms — under 38 fps — steps the tier down and remembers it; a median over
-90 ms is a crawl and goes straight to low. It never steps up on its own: a
-device that has proved slow once is slow.
+90 ms is a crawl and goes straight to low.
+
+It steps up too, but on different evidence, because `requestAnimationFrame`
+is capped at the display's refresh: a device with headroom to spare and one
+only just keeping up both report sixteen milliseconds a frame. What separates
+them is the frames they drop. So the up verdict looks only at frames drawn
+while the dice were moving — idle frames are cheaper, with no blur, no
+velocity pass and a cached shadow map, and prove nothing — and asks for a
+throw's worth of them (90) with 90% at the refresh rate and no
+more than 3% dropped. Even then it is a guess, so the tier above is taken on
+probation: twenty seconds in which the ordinary down rule, if it fires, undoes
+the step and makes that tier the ceiling, remembered for a week, that the app
+does not probe into again. A tier that holds for the whole trial is kept and
+remembered. A tier that proves slow at start-up sets the ceiling the same way.
 
 The windows are measured in time, not frames, and that matters. The first
 version counted frames — ninety to warm up, sixty to judge — and on a phone
@@ -808,8 +820,9 @@ unsampled canvas until the next launch, which starts on the remembered tier
 with the canvas multisampled.
 
 `?stats` on the URL puts a readout in the corner — the tier and where it came
-from, the frame rate, the monitor's last median, the pixel ratio and the GPU —
-for testing on a phone, where there is no console to read.
+from, whether it is on trial, the ceiling, the frame rate, the monitor's last
+median, the pixel ratio and the GPU — for testing on a phone, where there is
+no console to read.
 
 `npm run bench` prints the table above for each tier; `--tier low`, `--dpr 2`,
 `--width`, `--height` and `--pool` change what is measured. It uses the same

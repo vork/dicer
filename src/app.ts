@@ -19,9 +19,13 @@ import {
   chooseQuality,
   describeGpu,
   FrameRateMonitor,
+  higherTier,
   lowerTier,
   QUALITY,
+  rememberCeiling,
+  rememberedCeiling,
   rememberTier,
+  tierAbove,
   type QualityChoice,
   type QualitySettings,
   type QualityTier,
@@ -57,6 +61,15 @@ export class App {
   private readonly qualityChoice: QualityChoice;
   private readonly gpu: string;
   private readonly monitor = new FrameRateMonitor();
+  /** The best tier the device may try; a tier that proved too slow lowers it. */
+  private ceiling: QualityTier = rememberedCeiling();
+  /**
+   * Set while a tier reached by stepping up is on trial. If the monitor finds
+   * it slow before this runs out, the step is undone and the tier becomes the
+   * ceiling; if it holds, the tier is kept and remembered.
+   */
+  private probationMs = 0;
+  static readonly PROBATION_MS = 20000;
   /** The key light, whose shadow map a change of tier resizes. */
   private keyLight!: THREE.DirectionalLight;
   /**
@@ -279,6 +292,37 @@ export class App {
     return this.renderer.capabilities.maxTextureSize >= 8192 && window.innerWidth > 700 ? 4096 : 2048;
   }
 
+  /**
+   * One frame's worth of the tier deciding itself. Down when the device is
+   * slow; up, on probation, when a throw ran at the refresh rate; and a tier
+   * that fails its probation becomes the ceiling.
+   */
+  private judgeQuality(frameMs: number) {
+    const tier = this.quality.tier;
+    const verdict = this.monitor.sample(frameMs, this.diceWorld.isRolling);
+    if (this.probationMs > 0) {
+      this.probationMs -= frameMs;
+      if (this.probationMs <= 0) {
+        // Held up for the whole trial: this is the device's tier now.
+        rememberTier(tier);
+      }
+    }
+    if (verdict === 'crawl' || verdict === 'down') {
+      if (tier === 'low') return;
+      // Too slow, so the tier above this one is off limits until the ceiling
+      // is forgotten — whether it was reached by stepping up or started on.
+      this.ceiling = lowerTier(tier);
+      rememberCeiling(this.ceiling);
+      this.probationMs = 0;
+      this.applyQuality(verdict === 'crawl' ? 'low' : lowerTier(tier), true);
+    } else if (verdict === 'up') {
+      const next = higherTier(tier);
+      if (next === tier || tierAbove(next, this.ceiling)) return;
+      this.probationMs = App.PROBATION_MS;
+      this.applyQuality(next, false);
+    }
+  }
+
   /** The HUD's translucency and the CSS vignette follow the tier. */
   private applyQualityToDocument() {
     document.body.dataset.quality = this.quality.tier;
@@ -350,11 +394,7 @@ export class App {
     // A device that cannot keep up is moved down a tier. Not while a tool has
     // pinned the tier, and not for a seeded run, which is timed by the frame
     // count rather than the clock.
-    if (!this.qualityChoice.pinned && !this.diceWorld.seeded && !document.hidden && this.quality.tier !== 'low') {
-      const drop = this.monitor.sample(measured * 1000);
-      if (drop === 2) this.applyQuality('low', true);
-      else if (drop === 1) this.applyQuality(lowerTier(this.quality.tier), true);
-    }
+    if (!this.qualityChoice.pinned && !this.diceWorld.seeded && !document.hidden) this.judgeQuality(measured * 1000);
     this.updateStats(measured);
 
     // While nothing moves, the lowest tier draws every other frame. The time
@@ -423,8 +463,10 @@ export class App {
     this.statsFrames = 0;
     this.statsMs = 0;
     const judged = this.monitor.median ? `, monitor median ${this.monitor.median.toFixed(0)} ms` : '';
+    const trial = this.probationMs > 0 ? ` (on trial, ${(this.probationMs / 1000).toFixed(0)}s)` : '';
+    const ceiling = this.ceiling !== 'high' ? `, ceiling ${this.ceiling}` : '';
     this.stats.textContent =
-      `${this.quality.tier} (${this.qualityChoice.reason}) · ${fps.toFixed(0)} fps${judged} · ` +
+      `${this.quality.tier}${trial} (${this.qualityChoice.reason}${ceiling}) · ${fps.toFixed(0)} fps${judged} · ` +
       `${this.renderer.getPixelRatio()}x · ${this.gpu || 'gpu unknown'}`;
   }
 
@@ -499,6 +541,8 @@ export class App {
         pinned: this.qualityChoice.pinned,
         gpu: this.gpu,
         monitorMedian: this.monitor.median,
+        ceiling: this.ceiling,
+        probationMs: this.probationMs,
       }),
       setQuality: (tier: QualityTier) => this.applyQuality(tier, false),
       samplesReport: () => this.postFx.samplesReport(),

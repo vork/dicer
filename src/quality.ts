@@ -25,8 +25,11 @@
  *
  * A tier is chosen at start-up from a `?quality=` override, a tier remembered
  * from an earlier session, or a look at the GPU; after that a monitor watches
- * the sustained frame rate and steps down a tier when it stays low. It never
- * steps up on its own: a device that has proved slow once is slow.
+ * the sustained frame rate and steps down a tier when it stays low. It also
+ * steps up: when the frames of a throw sit at the display's refresh rate with
+ * almost none dropped, the tier above is tried on probation, and kept if it
+ * holds up. A tier that proves too slow becomes a ceiling — remembered for a
+ * week — that the app does not probe into again.
  */
 
 export type QualityTier = 'high' | 'medium' | 'low';
@@ -131,6 +134,46 @@ export function lowerTier(tier: QualityTier): QualityTier {
   return QUALITY_TIERS[Math.min(at + 1, QUALITY_TIERS.length - 1)];
 }
 
+/** The tier above, or the same one at the top. */
+export function higherTier(tier: QualityTier): QualityTier {
+  const at = QUALITY_TIERS.indexOf(tier);
+  return QUALITY_TIERS[Math.max(at - 1, 0)];
+}
+
+/** Whether `a` is a better tier than `b`. */
+export function tierAbove(a: QualityTier, b: QualityTier): boolean {
+  return QUALITY_TIERS.indexOf(a) < QUALITY_TIERS.indexOf(b);
+}
+
+const CEILING_KEY = 'dicer.quality.ceiling';
+/** How long a tier that proved too slow stays off limits. */
+const CEILING_DAYS = 7;
+
+/**
+ * Records the best tier the device is allowed to try. Set when a tier proves
+ * too slow — to the one below it — so the app does not keep probing into it.
+ * Forgotten after a week: a phone that was hot, or on a bad day, gets another
+ * chance.
+ */
+export function rememberCeiling(tier: QualityTier) {
+  try {
+    localStorage.setItem(CEILING_KEY, JSON.stringify({ tier, at: Date.now() }));
+  } catch {
+    // As above.
+  }
+}
+
+export function rememberedCeiling(): QualityTier {
+  try {
+    const stored = JSON.parse(localStorage.getItem(CEILING_KEY) ?? 'null') as { tier?: unknown; at?: unknown } | null;
+    if (!stored || !isQualityTier(stored.tier) || typeof stored.at !== 'number') return 'high';
+    if (Date.now() - stored.at > CEILING_DAYS * 24 * 3600 * 1000) return 'high';
+    return stored.tier;
+  } catch {
+    return 'high';
+  }
+}
+
 export function rememberTier(tier: QualityTier | null) {
   try {
     if (tier) localStorage.setItem(STORAGE_KEY, tier);
@@ -209,10 +252,10 @@ export function chooseQuality(search = window.location.search, gpu = describeGpu
 }
 
 /**
- * Watches the sustained frame rate and says when it has stayed too low.
+ * Watches the sustained frame rate and says when the tier should change.
  *
- * Works on windows of recent frame intervals, judged by their median so that
- * a lone hitch — a shader compiling, a tab coming back — cannot trip it. The
+ * Down: windows of recent frame intervals, judged by their median so that a
+ * lone hitch — a shader compiling, a tab coming back — cannot trip it. The
  * first stretch after a change of tier is ignored altogether: every new program
  * compiles on its first draw, and those frames say nothing about the device.
  *
@@ -221,6 +264,15 @@ export function chooseQuality(search = window.location.search, gpu = describeGpu
  * second that was half a minute before it did anything, while frames over a
  * quarter of a second were thrown out as stalls, which on the slowest phones
  * was every frame. The device it existed for was the one it could not see.
+ *
+ * Up is a different question, because requestAnimationFrame is capped at the
+ * display's refresh: a device with headroom to spare and one only just keeping
+ * up both report sixteen milliseconds a frame. What separates them is the
+ * frames they drop. So the up verdict looks only at frames drawn while the
+ * dice were moving — idle frames are cheaper, with no blur, no velocity pass
+ * and a cached shadow map, and prove nothing — and asks for at least a
+ * throw's worth of them at the refresh rate with almost none dropped. Even
+ * then it is a guess, which is why the tier above is taken on probation.
  */
 export class FrameRateMonitor {
   /** After a reset, this much time is ignored, and never fewer frames than this. */
@@ -237,11 +289,23 @@ export class FrameRateMonitor {
   static readonly CRAWL_MS = 90;
   /** A frame this long is not a frame, it is the tab having been away. */
   static readonly STALL_MS = 2000;
+  /** A moving frame at or under this is at a 60Hz display's refresh. */
+  static readonly FAST_MS = 17.5;
+  /** A moving frame over this was dropped. */
+  static readonly DROP_MS = 25;
+  /** Moving frames needed before an up verdict: about one throw at 60fps. */
+  static readonly UP_FRAMES = 90;
+  /** Of which at most this share may be dropped, and at least this share fast. */
+  static readonly UP_DROPS = 0.03;
+  static readonly UP_FAST = 0.9;
 
   private warmupMs = FrameRateMonitor.WARMUP_MS;
   private warmupFrames = FrameRateMonitor.WARMUP_FRAMES;
   private readonly frames: number[] = [];
   private windowMs = 0;
+  private movingFrames = 0;
+  private movingFast = 0;
+  private movingDrops = 0;
   /** The last window's median, for a readout. */
   median = 0;
 
@@ -250,29 +314,49 @@ export class FrameRateMonitor {
     this.warmupFrames = FrameRateMonitor.WARMUP_FRAMES;
     this.frames.length = 0;
     this.windowMs = 0;
+    this.movingFrames = 0;
+    this.movingFast = 0;
+    this.movingDrops = 0;
   }
 
   /**
-   * Records one frame interval. Returns how many tiers to drop: 0 while the
-   * device keeps up or the window is still filling, 1 when it is slow, 2 when
-   * it is crawling.
+   * Records one frame interval, and whether the dice were moving during it.
+   * Returns the verdict: 'down' when the device is slow, 'crawl' when it is
+   * far too slow for anything but the lowest tier, 'up' when a throw's worth
+   * of moving frames sat at the refresh rate, 'hold' otherwise.
    */
-  sample(ms: number): 0 | 1 | 2 {
-    if (ms <= 0 || ms >= FrameRateMonitor.STALL_MS) return 0;
+  sample(ms: number, moving: boolean): 'hold' | 'down' | 'crawl' | 'up' {
+    if (ms <= 0 || ms >= FrameRateMonitor.STALL_MS) return 'hold';
     if (this.warmupMs > 0 || this.warmupFrames > 0) {
       this.warmupMs -= ms;
       this.warmupFrames--;
-      return 0;
+      return 'hold';
     }
     this.frames.push(ms);
     this.windowMs += ms;
-    if (this.frames.length < FrameRateMonitor.MIN_FRAMES) return 0;
-    if (this.frames.length < FrameRateMonitor.WINDOW_FRAMES && this.windowMs < FrameRateMonitor.WINDOW_MS) return 0;
+    if (moving) {
+      this.movingFrames++;
+      if (ms <= FrameRateMonitor.FAST_MS) this.movingFast++;
+      if (ms > FrameRateMonitor.DROP_MS) this.movingDrops++;
+    }
+    if (this.frames.length < FrameRateMonitor.MIN_FRAMES) return 'hold';
+    if (this.frames.length < FrameRateMonitor.WINDOW_FRAMES && this.windowMs < FrameRateMonitor.WINDOW_MS) return 'hold';
     const sorted = [...this.frames].sort((a, b) => a - b);
     this.median = sorted[sorted.length >> 1];
     this.frames.length = 0;
     this.windowMs = 0;
-    if (this.median > FrameRateMonitor.CRAWL_MS) return 2;
-    return this.median > FrameRateMonitor.LIMIT_MS ? 1 : 0;
+    if (this.median > FrameRateMonitor.CRAWL_MS) return 'crawl';
+    if (this.median > FrameRateMonitor.LIMIT_MS) return 'down';
+    if (this.movingFrames >= FrameRateMonitor.UP_FRAMES) {
+      const up =
+        this.movingDrops <= this.movingFrames * FrameRateMonitor.UP_DROPS &&
+        this.movingFast >= this.movingFrames * FrameRateMonitor.UP_FAST;
+      // Judged; the next verdict wants a fresh throw's worth either way.
+      this.movingFrames = 0;
+      this.movingFast = 0;
+      this.movingDrops = 0;
+      if (up) return 'up';
+    }
+    return 'hold';
   }
 }
