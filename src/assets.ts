@@ -91,3 +91,49 @@ export async function loadSetTextures(
 
   return { map, roughnessMap, normalMap };
 }
+
+/** The three surface maps of one tray material, from Poly Haven via tools/build-textures.mjs. */
+export interface TraySurface {
+  map: THREE.Texture;
+  normalMap: THREE.Texture;
+  /** Ambient occlusion in red, roughness in green, metalness in blue. */
+  armMap: THREE.Texture;
+}
+
+export interface TrayTextures {
+  leather: TraySurface;
+  felt: TraySurface;
+  wood: TraySurface;
+}
+
+/**
+ * Loads the tray's surface maps, or resolves to null if they are not there —
+ * the tray then falls back to its procedural maps. Tiling and repeat are the
+ * tray's business; this only sets what every map shares.
+ */
+export async function loadTrayTextures(anisotropy: number): Promise<TrayTextures | null> {
+  const loader = new THREE.TextureLoader();
+  const base = `${import.meta.env.BASE_URL}tray/`;
+  const load = (file: string, colorSpace: string) =>
+    loader.loadAsync(`${base}${file}`).then((texture) => {
+      texture.colorSpace = colorSpace;
+      texture.anisotropy = anisotropy;
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      return texture;
+    });
+  const surface = async (name: string): Promise<TraySurface> => {
+    const [map, normalMap, armMap] = await Promise.all([
+      load(`${name}-diff.webp`, THREE.SRGBColorSpace),
+      load(`${name}-normal.webp`, THREE.NoColorSpace),
+      load(`${name}-arm.webp`, THREE.NoColorSpace),
+    ]);
+    return { map, normalMap, armMap };
+  };
+  try {
+    const [leather, felt, wood] = await Promise.all([surface('leather'), surface('felt'), surface('wood')]);
+    return { leather, felt, wood };
+  } catch {
+    return null;
+  }
+}

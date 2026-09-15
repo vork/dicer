@@ -1477,6 +1477,7 @@ pose, not the antialiasing.
 | `npm run dev` | dev server |
 | `npm run build` | typecheck + production build |
 | `npm run assets` | regenerate `public/dice/*` from the source GLB |
+| `npm run textures` | build the tray's WebP maps from Poly Haven downloads (`--download`, or `--source <dir>`) |
 | `npm run verify` | values, reading, camera and physics |
 | `npm run verify:values` | opposite-face-sum invariant on the tables |
 | `npm run verify:reading` | every slot reads back from every yaw, and pool resolution |
@@ -1515,7 +1516,38 @@ software GPU they run on is on the weak-GPU list, and without the pin the app
 would quite correctly start on the low tier, with no composer to check the
 antialiasing of and no motion blur to measure.
 
+## The tray's surfaces
+
+The leather, the felt and the table under the tray are Poly Haven's CC0
+textures: [brown_leather](https://polyhaven.com/a/brown_leather) on the walls,
+[terry_cloth](https://polyhaven.com/a/terry_cloth) on the floor and
+[wood_table_worn](https://polyhaven.com/a/wood_table_worn) on the ground.
+`tools/build-textures.mjs` turns each into three WebP maps in `public/tray/`
+— the diffuse colour, the GL normal map and an ARM map with occlusion in red,
+roughness in green and metalness in blue, which is how Poly Haven packs them
+and how three reads a `roughnessMap` (green) — from either the API
+(`--download`) or a folder of downloaded files or zips (`--source`). When the
+maps are not there the tray falls back to its procedural leather and felt.
+
+Their scale is set from the closest shot rather than from life. In the reveal
+a die is about a fifth of the screen high — some 170 screen pixels a
+centimetre on a phone at the high tier — and a 1024 map is sharp there when a
+tile spans about 6cm, so the felt tiles every 3.5 units (7cm), the leather
+every 5 (10cm), and the wood, which is far away and fogged, every 20 (40cm).
+The terry loops come out far finer than life, which is what makes the cloth
+read as felt nap; the leather grain is ten times finer than life and reads as
+fine-grained leather; the planks stay near life size. The diffuse and normal
+maps are 1024 and the ARM map 512, because roughness is smooth at that scale;
+2K would cost four times the memory and bandwidth on every tier for repeats
+that do not show. The floor's baked occlusion (see "Ambient occlusion") is
+kept as its `aoMap` on the second UV set, above the cloth's own.
+
 ## Credits
+
+Tray surfaces: [brown_leather](https://polyhaven.com/a/brown_leather),
+[terry_cloth](https://polyhaven.com/a/terry_cloth) and
+[wood_table_worn](https://polyhaven.com/a/wood_table_worn) from
+[Poly Haven](https://polyhaven.com), CC0.
 
 Dice models: [RPG Dice Set](https://sketchfab.com/3d-models/rpg-dice-set-2498c370c56842f89fa3d7096c72ed56)
 by [ghosted](https://sketchfab.com/dianaavlis2002), CC-BY-4.0.

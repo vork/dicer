@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
 
-import { loadDiceAssets, loadSetTextures, type DiceAssets, type DiceSet } from './assets';
+import { loadDiceAssets, loadSetTextures, loadTrayTextures, type DiceAssets, type DiceSet } from './assets';
 import { createEnvironment, createLights } from './scene/environment';
 import { createTray, TRAY, type Tray } from './scene/tray';
 import { createDiceMaterial, type DiceMaterial, type FlakeSettings } from './scene/dice-material';
@@ -159,7 +159,12 @@ export class App {
   async start() {
     // Rapier inlines its wasm as base64, which is most of the bundle. Importing it
     // dynamically puts it in its own chunk that loads alongside the dice assets.
-    const [rapier, assets] = await Promise.all([loadRapier(), loadDiceAssets()]);
+    const anisotropy = Math.min(this.quality.anisotropy, this.renderer.capabilities.getMaxAnisotropy());
+    const [rapier, assets, trayTextures] = await Promise.all([
+      loadRapier(),
+      loadDiceAssets(),
+      loadTrayTextures(anisotropy),
+    ]);
     this.rapier = rapier;
     this.assets = assets;
     this.activeSet = this.assets.sets[0];
@@ -171,7 +176,7 @@ export class App {
     this.keyLight = lights[0] as THREE.DirectionalLight;
     for (const light of lights) this.scene.add(light);
 
-    this.tray = createTray();
+    this.tray = createTray(trayTextures);
     this.tray.setDetail(this.quality.trayDetail);
     this.scene.add(this.tray.group);
 

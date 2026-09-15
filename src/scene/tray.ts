@@ -1,6 +1,23 @@
 import * as THREE from 'three';
 import { createFeltMaps, createLeatherMaps } from './textures';
 import { applyFloorAoUv, createTrayFloorAo } from './tray-ao';
+import type { TrayTextures } from '../assets';
+
+/**
+ * How big one tile of each Poly Haven map is on the tray, in world units (one
+ * unit is 2cm). Chosen from the closest shot rather than from life: in the
+ * reveal a die is about a fifth of the screen high, some 170 screen pixels a
+ * centimetre on a phone at the high tier, and a 1024 map is sharp there when
+ * a tile spans about 6cm. The terry loops come out far finer than life, which
+ * is what makes the cloth read as felt nap; the leather grain is ten times
+ * finer than life, which reads as fine-grained leather; the wood is far away
+ * and fogged, so its planks stay near life size.
+ */
+const TILE_UNITS = {
+  felt: 3.5,
+  leather: 5,
+  wood: 20,
+};
 
 /**
  * Tray dimensions in world units. One unit is roughly 20mm — the scale the asset
@@ -71,6 +88,11 @@ export interface Tray {
 
 export type TrayDetail = 'full' | 'lite';
 
+/** Tiles per world unit of the wall's box UVs. */
+const WALL_UV_SCALE = 0.28;
+/** The ground disc, in world units. */
+const GROUND_DIAMETER = 140;
+
 /**
  * Extrudes a flat profile into an upright solid.
  *
@@ -92,24 +114,39 @@ function extrudeUpright(
   return geometry;
 }
 
-export function createTray(): Tray {
+export function createTray(textures: TrayTextures | null = null): Tray {
   const group = new THREE.Group();
   // ShapeGeometry hands through the shape's own coordinates as UVs, so for the
-  // floor `repeat` reads as tiles per world unit — one tile per ~1.4 units here.
+  // floor `repeat` reads as tiles per world unit — one tile per ~1.4 units for
+  // the procedural felt, which is the fallback when the Poly Haven maps are not
+  // built (tools/build-textures.mjs).
   const felt = createFeltMaps(512, 0.7);
   const leather = createLeatherMaps();
+  const tile = (surface: keyof typeof TILE_UNITS, perUnit: number) => {
+    const maps = textures?.[surface];
+    if (!maps) return;
+    const repeat = perUnit / TILE_UNITS[surface];
+    for (const map of [maps.map, maps.normalMap, maps.armMap]) map.repeat.set(repeat, repeat);
+  };
+  // The floor's UVs are world units; the wall's box UVs are 0.28 tiles a unit;
+  // the ground's run 0..1 across its 140-unit circle.
+  tile('felt', 1);
+  tile('leather', 1 / WALL_UV_SCALE);
+  tile('wood', GROUND_DIAMETER);
 
   const inner = { w: TRAY.innerWidth, d: TRAY.innerDepth };
   const outer = { w: inner.w + TRAY.wallThickness * 2, d: inner.d + TRAY.wallThickness * 2 };
 
   // --- floor -------------------------------------------------------------
   const floorMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0x17202c,
+    // The cloth's own colour is near white; this tints it to the tray's felt.
+    color: textures ? 0x2a3a4e : 0x17202c,
     roughness: 1,
     metalness: 0,
-    normalMap: felt.normalMap,
+    map: textures?.felt.map ?? null,
+    normalMap: textures?.felt.normalMap ?? felt.normalMap,
     normalScale: new THREE.Vector2(1.1, 1.1),
-    roughnessMap: felt.roughnessMap,
+    roughnessMap: textures?.felt.armMap ?? felt.roughnessMap,
     sheen: 0.75,
     sheenRoughness: 0.85,
     sheenColor: new THREE.Color(0x3c5a72),
@@ -146,15 +183,18 @@ export function createTray(): Tray {
   );
   wallGeometry.translate(0, TRAY.floorY, 0);
   // Extruded sides carry no useful UVs for a tiling grain, so derive box UVs.
-  applyBoxUv(wallGeometry, 0.28);
+  applyBoxUv(wallGeometry, WALL_UV_SCALE);
 
   const wallMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0x322820,
-    roughness: 0.62,
+    // The leather map carries its own brown; the tint only takes it down to
+    // the tray's dark room.
+    color: textures ? 0x8c8078 : 0x322820,
+    roughness: textures ? 1 : 0.62,
     metalness: 0,
-    normalMap: leather.normalMap,
+    map: textures?.leather.map ?? null,
+    normalMap: textures?.leather.normalMap ?? leather.normalMap,
     normalScale: new THREE.Vector2(0.9, 0.9),
-    roughnessMap: leather.roughnessMap,
+    roughnessMap: textures?.leather.armMap ?? leather.roughnessMap,
     clearcoat: 0.35,
     clearcoatRoughness: 0.62,
     envMapIntensity: 0.85,
@@ -213,18 +253,23 @@ export function createTray(): Tray {
 
   // --- ground the tray on something, so it is not floating in a void --------
   const groundMaterial = new THREE.MeshPhysicalMaterial({
-    color: 0x08080b,
-    roughness: 0.72,
-    metalness: 0.15,
-    normalMap: leather.normalMap,
-    normalScale: new THREE.Vector2(0.25, 0.25),
+    // A worn table under the tray, kept dark so the tray still owns the light.
+    color: textures ? 0x5a5550 : 0x08080b,
+    roughness: textures ? 1 : 0.72,
+    metalness: textures ? 0 : 0.15,
+    map: textures?.wood.map ?? null,
+    normalMap: textures?.wood.normalMap ?? leather.normalMap,
+    normalScale: new THREE.Vector2(textures ? 0.6 : 0.25, textures ? 0.6 : 0.25),
+    roughnessMap: textures?.wood.armMap ?? null,
     envMapIntensity: 0.35,
   });
-  // The ground covers more of the frame than anything else and is nearly
-  // black, so on a slow GPU it is the cheapest shader that still takes the
-  // tray's shadow.
-  const groundLite = new THREE.MeshLambertMaterial({ color: 0x08080b });
-  const ground = new THREE.Mesh<THREE.BufferGeometry, THREE.Material>(new THREE.CircleGeometry(70, 64), groundMaterial);
+  // The ground covers more of the frame than anything else, so on a slow GPU
+  // it is the cheapest shader that still shows the wood.
+  const groundLite = new THREE.MeshLambertMaterial({
+    color: textures ? 0x5a5550 : 0x08080b,
+    map: textures?.wood.map ?? null,
+  });
+  const ground = new THREE.Mesh<THREE.BufferGeometry, THREE.Material>(new THREE.CircleGeometry(GROUND_DIAMETER / 2, 64), groundMaterial);
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = TRAY.floorY - 0.78;
   ground.receiveShadow = false;
@@ -256,6 +301,13 @@ export function createTray(): Tray {
       felt.roughnessMap.dispose();
       leather.normalMap.dispose();
       leather.roughnessMap.dispose();
+      if (textures) {
+        for (const surface of Object.values(textures)) {
+          surface.map.dispose();
+          surface.normalMap.dispose();
+          surface.armMap.dispose();
+        }
+      }
     },
   };
 }
