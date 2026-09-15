@@ -163,7 +163,7 @@ export class App {
     const [rapier, assets, trayTextures] = await Promise.all([
       loadRapier(),
       loadDiceAssets(),
-      loadTrayTextures(anisotropy),
+      loadTrayTextures(anisotropy, this.quality.largeTrayMaps),
     ]);
     this.rapier = rapier;
     this.assets = assets;

@@ -111,7 +111,7 @@ export interface TrayTextures {
  * the tray then falls back to its procedural maps. Tiling and repeat are the
  * tray's business; this only sets what every map shares.
  */
-export async function loadTrayTextures(anisotropy: number): Promise<TrayTextures | null> {
+export async function loadTrayTextures(anisotropy: number, large = false): Promise<TrayTextures | null> {
   const loader = new THREE.TextureLoader();
   const base = `${import.meta.env.BASE_URL}tray/`;
   const load = (file: string, colorSpace: string) =>
@@ -122,16 +122,23 @@ export async function loadTrayTextures(anisotropy: number): Promise<TrayTextures
       texture.wrapT = THREE.RepeatWrapping;
       return texture;
     });
-  const surface = async (name: string): Promise<TraySurface> => {
+  const surface = async (name: string, hasLarge: boolean): Promise<TraySurface> => {
+    // The 2048 maps exist for the felt and the wood; a tier that wants them
+    // and finds them missing falls back to the 1024 ones.
+    const suffix = large && hasLarge ? '-2k' : '';
+    const pick = (kind: string, colorSpace: string) =>
+      load(`${name}-${kind}${suffix}.webp`, colorSpace).catch(() =>
+        suffix ? load(`${name}-${kind}.webp`, colorSpace) : Promise.reject(new Error(`no ${name} ${kind} map`)),
+      );
     const [map, normalMap, armMap] = await Promise.all([
-      load(`${name}-diff.webp`, THREE.SRGBColorSpace),
-      load(`${name}-normal.webp`, THREE.NoColorSpace),
+      pick('diff', THREE.SRGBColorSpace),
+      pick('normal', THREE.NoColorSpace),
       load(`${name}-arm.webp`, THREE.NoColorSpace),
     ]);
     return { map, normalMap, armMap };
   };
   try {
-    const [leather, felt, wood] = await Promise.all([surface('leather'), surface('felt'), surface('wood')]);
+    const [leather, felt, wood] = await Promise.all([surface('leather', false), surface('felt', true), surface('wood', true)]);
     return { leather, felt, wood };
   } catch {
     return null;

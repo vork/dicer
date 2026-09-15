@@ -5,18 +5,23 @@ import type { TrayTextures } from '../assets';
 
 /**
  * How big one tile of each Poly Haven map is on the tray, in world units (one
- * unit is 2cm). Chosen from the closest shot rather than from life: in the
- * reveal a die is about a fifth of the screen high, some 170 screen pixels a
- * centimetre on a phone at the high tier, and a 1024 map is sharp there when
- * a tile spans about 6cm. The terry loops come out far finer than life, which
- * is what makes the cloth read as felt nap; the leather grain is ten times
- * finer than life, which reads as fine-grained leather; the wood is far away
- * and fogged, so its planks stay near life size.
+ * unit is 2cm), for a 1024 map; a 2048 map tiles twice as large, so the texel
+ * density on the surface is the same either way and the repeats are fewer.
+ *
+ * Chosen from the closest shot rather than from life. In the reveal a die is
+ * about a fifth of the screen high, some 170 screen pixels a centimetre on a
+ * phone at the high tier, and a map is sharp there at about 146 texels a
+ * centimetre — a 1024 tile every 7cm. Life size would be 28 texels a
+ * centimetre (the cloth is 55.8 pixels a centimetre at 2048), far too soft.
+ * The terry loops come out five times finer than life, which is what makes
+ * the cloth read as felt nap; the leather grain (51.2 pixels a centimetre at
+ * 2048) is four times finer than life and reads as fine-grained leather; the
+ * wood (37.2) is far away and fogged, and at 2048 tiles at its true 55cm.
  */
 const TILE_UNITS = {
   felt: 3.5,
   leather: 5,
-  wood: 20,
+  wood: 13.75,
 };
 
 /**
@@ -125,7 +130,8 @@ export function createTray(textures: TrayTextures | null = null): Tray {
   const tile = (surface: keyof typeof TILE_UNITS, perUnit: number) => {
     const maps = textures?.[surface];
     if (!maps) return;
-    const repeat = perUnit / TILE_UNITS[surface];
+    const width = (maps.map.image as { width?: number } | undefined)?.width ?? 1024;
+    const repeat = perUnit / (TILE_UNITS[surface] * (width / 1024));
     for (const map of [maps.map, maps.normalMap, maps.armMap]) map.repeat.set(repeat, repeat);
   };
   // The floor's UVs are world units; the wall's box UVs are 0.28 tiles a unit;

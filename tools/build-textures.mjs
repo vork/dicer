@@ -12,7 +12,7 @@
  *
  * The source files come from one of two places:
  *
- *   --download        fetch the 1K JPGs from the Poly Haven API
+ *   --download        fetch the 2K JPGs from the Poly Haven API
  *   --source <dir>    look in a folder of downloaded files or zips (default:
  *                     the session's uploads folder), matched by asset name
  *
@@ -38,6 +38,12 @@ const ASSETS = {
 const OUT = 'public/tray';
 const SIZE = { diff: 1024, normal: 1024, arm: 512 };
 const QUALITY = { diff: 82, normal: 90, arm: 80 };
+/**
+ * Surfaces that also get a 2048 diffuse and normal, for the high quality tier.
+ * The felt is under the dice in the closest shot and the wood fills most of
+ * the wide one; the leather is seen at a slant and 1024 is enough for it.
+ */
+const LARGE = new Set(['felt', 'wood']);
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => {
@@ -81,7 +87,7 @@ async function fetchAsset(id) {
   const wanted = ['Diffuse', 'nor_gl', 'arm', 'Rough', 'AO'];
   const got = [];
   for (const map of wanted) {
-    const entry = files[map]?.['1k']?.jpg;
+    const entry = files[map]?.['2k']?.jpg ?? files[map]?.['1k']?.jpg;
     if (!entry) continue;
     const response = await fetch(entry.url);
     if (!response.ok) throw new Error(`${entry.url}: ${response.status}`);
@@ -95,7 +101,7 @@ async function fetchAsset(id) {
 /** Which map a Poly Haven file name is. */
 function kindOf(file) {
   const name = path.basename(file).toLowerCase();
-  if (/_diff(?:use)?[_.]/.test(name)) return 'diff';
+  if (/_(?:diff(?:use)?|albedo|col(?:or)?)[_.]/.test(name)) return 'diff';
   if (/_nor_gl[_.]/.test(name)) return 'normal';
   if (/_arm[_.]/.test(name)) return 'arm';
   if (/_rough(?:ness)?[_.]/.test(name)) return 'rough';
@@ -123,6 +129,10 @@ async function build(name, id, files) {
 
   await resize(maps.diff.file, SIZE.diff).webp({ quality: QUALITY.diff }).toFile(path.join(OUT, `${name}-diff.webp`));
   await resize(maps.normal.file, SIZE.normal).webp({ quality: QUALITY.normal }).toFile(path.join(OUT, `${name}-normal.webp`));
+  if (LARGE.has(name) && maps.diff.size >= 2048 && maps.normal.size >= 2048) {
+    await resize(maps.diff.file, 2048).webp({ quality: QUALITY.diff }).toFile(path.join(OUT, `${name}-diff-2k.webp`));
+    await resize(maps.normal.file, 2048).webp({ quality: QUALITY.normal }).toFile(path.join(OUT, `${name}-normal-2k.webp`));
+  }
 
   let arm;
   if (maps.arm) {
@@ -146,7 +156,8 @@ async function build(name, id, files) {
   }
   await arm.webp({ quality: QUALITY.arm }).toFile(path.join(OUT, `${name}-arm.webp`));
 
-  const sizes = ['diff', 'normal', 'arm'].map((k) => `${k} ${(fs.statSync(path.join(OUT, `${name}-${k}.webp`)).size / 1024).toFixed(0)} KB`);
+  const built = ['diff', 'normal', 'arm', 'diff-2k', 'normal-2k'].filter((k) => fs.existsSync(path.join(OUT, `${name}-${k}.webp`)));
+  const sizes = built.map((k) => `${k} ${(fs.statSync(path.join(OUT, `${name}-${k}.webp`)).size / 1024).toFixed(0)} KB`);
   console.log(`  ${name} (${id}): ${sizes.join(', ')}`);
   return true;
 }

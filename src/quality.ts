@@ -64,6 +64,8 @@ export interface QualitySettings {
   coinDetail: 'full' | 'lite';
   /** The tray's materials: the ground's shader, the felt's sheen, the leather's clear coat. */
   trayDetail: 'full' | 'lite';
+  /** 2048 maps for the felt and the wood, where they are built; 1024 otherwise. */
+  largeTrayMaps: boolean;
   /** Frames skipped between rendered ones while nothing is moving. */
   idleFrameSkip: number;
 }
@@ -84,6 +86,7 @@ export const QUALITY: Record<QualityTier, QualitySettings> = {
     anisotropy: 16,
     coinDetail: 'full',
     trayDetail: 'full',
+    largeTrayMaps: true,
     idleFrameSkip: 0,
   },
   medium: {
@@ -101,6 +104,7 @@ export const QUALITY: Record<QualityTier, QualitySettings> = {
     anisotropy: 4,
     coinDetail: 'full',
     trayDetail: 'full',
+    largeTrayMaps: false,
     idleFrameSkip: 0,
   },
   low: {
@@ -118,6 +122,7 @@ export const QUALITY: Record<QualityTier, QualitySettings> = {
     anisotropy: 2,
     coinDetail: 'lite',
     trayDetail: 'lite',
+    largeTrayMaps: false,
     idleFrameSkip: 1,
   },
 };
