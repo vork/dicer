@@ -63,6 +63,14 @@ export interface CoinSettings {
   pits: number;
   /** The micro tile's strength: the grain, micro-scratches and pores under everything. */
   micro: number;
+  /**
+   * The photographed metal (public/dice/coin-metal.webp, from ambientCG's
+   * Metal007): how much its scratches tilt the normal, vary the tone, and
+   * vary the roughness. Its own colour is not used; each metal's is.
+   */
+  metalBump: number;
+  metalTint: number;
+  metalRough: number;
 }
 
 export const DEFAULT_COIN: CoinSettings = {
@@ -74,7 +82,17 @@ export const DEFAULT_COIN: CoinSettings = {
   patina: 1.0,
   pits: 0.6,
   micro: 1.0,
+  // The photograph's normal is nearly flat — its slopes are a few hundredths —
+  // so it is pushed; its tone and roughness vary by about 5% and are used as
+  // they are, scaled to a mean of one.
+  metalBump: 3.0,
+  metalTint: 1.0,
+  metalRough: 0.5,
 };
+
+/** One tile of the photographed metal across this many coin units on the faces. */
+const COIN_METAL_TILE_UNITS = 2.5;
+const COIN_METAL_SLOPE_MAX = 0.1;
 
 /**
  * What the coin is struck from. Each metal is a reflectance — the colour a
@@ -195,6 +213,11 @@ const COIN_SLOPE_MAX = 1.5;
 const COIN_MICRO_SLOPE_MAX = 0.5;
 /** Micro tiles around the edge; the tile's size follows from the radius. Matches the bake. */
 const COIN_MICRO_TILES_AROUND = 34;
+/**
+ * The photographed metal wraps the edge in whole tiles too: the circumference
+ * is 3.97 units, and at 2.5 a tile that rounds to two.
+ */
+const COIN_METAL_TILES_AROUND = 2;
 
 const COIN_VERTEX_PARS = /* glsl */ `
 varying vec3 vCoinPosition;
@@ -224,6 +247,7 @@ const COIN_FRAGMENT_PARS = /* glsl */ `
 #define COIN_WEAR_RANGE ${COIN_WEAR_RANGE.toFixed(3)}
 #define COIN_SLOPE_MAX ${COIN_SLOPE_MAX.toFixed(3)}
 #define COIN_MICRO_SLOPE_MAX ${COIN_MICRO_SLOPE_MAX.toFixed(3)}
+#define COIN_METAL_SLOPE_MAX ${COIN_METAL_SLOPE_MAX.toFixed(3)}
 varying vec3 vCoinPosition;
 varying vec2 vCoinUv;
 varying vec3 vCoinRadial;
@@ -238,6 +262,11 @@ uniform float uCoinScratches;
 uniform float uCoinPatina;
 uniform float uCoinPits;
 uniform float uCoinMicro;
+uniform sampler2D uCoinMetalMap;
+uniform float uCoinMetalTile;
+uniform float uCoinMetalBump;
+uniform float uCoinMetalTint;
+uniform float uCoinMetalRough;
 uniform float uCoinHalfThickness;
 uniform float uCoinRadius;
 uniform float uCoinMicroTile;
@@ -439,6 +468,15 @@ vec4 coinMicro = uCoinMicro * mix(
   coinSideness
 );
 coinSurface += vec4(coinMicro.xy, 0.0, 0.0);
+// And the photographed metal, sampled the same two ways: its scratches tilt
+// the normal, and its tone and roughness (alpha and blue, each about a mean
+// of one half) vary the metal's own.
+vec2 coinMetalFaceUv = coinP.xz / uCoinMetalTile;
+vec2 coinMetalEdgeUv = vec2((coinAngle / (2.0 * PI)) * float(${COIN_METAL_TILES_AROUND}), coinP.y / uCoinMetalTile);
+vec4 coinMetalTexel = mix(texture2D(uCoinMetalMap, coinMetalFaceUv), texture2D(uCoinMetalMap, coinMetalEdgeUv), coinSideness);
+coinSurface.xy += (coinMetalTexel.rg * 2.0 - 1.0) * COIN_METAL_SLOPE_MAX * uCoinMetalBump;
+float coinMetalTone = mix(1.0, coinMetalTexel.a * 2.0, uCoinMetalTint);
+float coinMetalRough = (coinMetalTexel.b - 0.5) * uCoinMetalRough;
 float coinScratch = uCoinScratches * coinSurface.z;
 float coinPit = uCoinPits * coinSurface.w;
 float coinMicroMark = 0.7 * coinMicro.z + coinMicro.w;
@@ -478,6 +516,7 @@ coinBase *= 1.0 - 0.12 * coinScratch;
 // inside out. This puts the clean field below the relief and the grime below that.
 coinBase *= 1.0 + 0.12 * coinExposed;
 coinBase *= 1.0 - 0.48 * coinCavity;
+coinBase *= coinMetalTone;
 diffuseColor.rgb = coinBase;
 `;
 
@@ -495,6 +534,7 @@ roughnessFactor += 0.16 * coinScratch + 0.3 * coinPit + 0.16 * coinPatina + 0.12
 // and the edge is lit flat by the room, where a tenth of roughness is a big
 // step in brightness and the mottle drew as camouflage.
 roughnessFactor += coinRoughnessDetail(coinP, coinFootprint) * (1.0 - 0.6 * coinSideness);
+roughnessFactor += coinMetalRough;
 roughnessFactor = mix(roughnessFactor, 0.85, coinGrime);
 // Never a true mirror. Much below this the domed edges of the relief, which
 // face every direction, find the exact mirror angle of the spotlight somewhere
@@ -555,6 +595,10 @@ export function createCoinMaterial(
   anisotropy = 8,
 ): CoinMaterial {
   const coin: CoinSettings = { ...DEFAULT_COIN, ...settings };
+  // Until the photographed metal is in, and if it never is: a texel that
+  // tilts nothing and varies nothing.
+  const neutralMetal = new THREE.DataTexture(new Uint8Array([128, 128, 128, 128]), 1, 1, THREE.RGBAFormat);
+  neutralMetal.needsUpdate = true;
   // Clean until the map arrives: a single texel as far from any wall as the map
   // can say.
   const clean = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
@@ -570,6 +614,11 @@ export function createCoinMaterial(
     uCoinRadius: { value: radius },
     uCoinMicroTile: { value: (2 * Math.PI * radius) / COIN_MICRO_TILES_AROUND },
     uCoinMicro: { value: coin.micro },
+    uCoinMetalMap: { value: neutralMetal as THREE.Texture },
+    uCoinMetalTile: { value: COIN_METAL_TILE_UNITS },
+    uCoinMetalBump: { value: coin.metalBump },
+    uCoinMetalTint: { value: coin.metalTint },
+    uCoinMetalRough: { value: coin.metalRough },
     uCoinGrime: { value: coin.grime },
     uCoinPolish: { value: coin.polish },
     uCoinWearAmount: { value: coin.wear },
@@ -644,6 +693,13 @@ export function createCoinMaterial(
       t.wrapT = THREE.RepeatWrapping;
       uniforms.uCoinMicroMap.value = t;
     }),
+    load('coin-metal.webp', THREE.RepeatWrapping, true)
+      .then((t) => {
+        t.wrapT = THREE.RepeatWrapping;
+        uniforms.uCoinMetalMap.value = t;
+      })
+      // Not built: the neutral texel stays, and the coin is as it was.
+      .catch(() => undefined),
   ]).then(() => undefined);
 
   return {
@@ -661,6 +717,9 @@ export function createCoinMaterial(
       uniforms.uCoinScratches.value = coin.scratches;
       uniforms.uCoinPits.value = coin.pits;
       uniforms.uCoinMicro.value = coin.micro;
+      uniforms.uCoinMetalBump.value = coin.metalBump;
+      uniforms.uCoinMetalTint.value = coin.metalTint;
+      uniforms.uCoinMetalRough.value = coin.metalRough;
       applyMetal();
     },
     getCoin: () => ({ ...coin }),

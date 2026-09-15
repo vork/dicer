@@ -639,6 +639,31 @@ all three channels converge on white. The coin's environment intensity is a
 quarter of what the dice use, measured to the point where the relief stopped
 desaturating.
 
+### Its metal, photographed
+
+Under the baked and procedural weathering there is now a photographed metal:
+ambientCG's [Metal007](https://ambientcg.com/view?id=Metal007) (CC0), a
+polished gold with faint scratches. `tools/build-textures.mjs` packs it into
+one RGBA tile, `public/dice/coin-metal.webp`: the normal's slopes in the
+coin's own convention in red and green, the roughness in blue and the albedo
+in alpha, the last two scaled to a mean of half grey so they read as
+variation about whatever the metal's own polish and colour are. The
+photograph's gold is never used — the coin shader recolours the tile with
+each metal's base, so the silver, bronze, copper, iron, electrum and rose
+gold all wear the same scratches in their own colour.
+
+It is sampled the way the micro tile is, by x and z on the faces and by the
+distance around and y on the edge, with one tile per 2.5 units on the faces
+and two whole tiles around the edge so the wrap has no seam. Three settings
+say how much of it shows: `metalBump` tilts the normal by its scratches
+(pushed to 3, since the photograph's slopes are a few hundredths),
+`metalTint` varies the tone by its streaks (about 5%), and `metalRough` its
+roughness (half of the photograph's spread). Measured on `coin:look` for
+gold, silver and copper, the field means move by one or two levels; what it
+adds is the smudged, handled look of the streaks across the field and rim.
+Without the map built the shader reads a neutral texel and the coin is as it
+was.
+
 ### Its physics
 
 A coin is a round cylinder to the solver, not a convex hull of its mesh: the mesh
@@ -1477,7 +1502,7 @@ pose, not the antialiasing.
 | `npm run dev` | dev server |
 | `npm run build` | typecheck + production build |
 | `npm run assets` | regenerate `public/dice/*` from the source GLB |
-| `npm run textures` | build the tray's WebP maps from Poly Haven downloads (`--download`, or `--source <dir>`) |
+| `npm run textures` | build the tray's and the coin's WebP maps from Poly Haven and ambientCG downloads (`--download`, or `--source <dir>`) |
 | `npm run verify` | values, reading, camera and physics |
 | `npm run verify:values` | opposite-face-sum invariant on the tables |
 | `npm run verify:reading` | every slot reads back from every yaw, and pool resolution |
@@ -1539,11 +1564,14 @@ read as felt nap; the leather grain is ten times finer than life and reads as
 fine-grained leather; the planks stay near life size. The sources are 2K —
 the leather 51.2, the cloth 55.8 and the wood 37.2 pixels a centimetre —
 which at life-size tiling would be under 30 texels a centimetre, hence the
-smaller tiles. The 1024 maps serve every tier; the felt and the wood also
-have 2048 variants for the high tier, which tile twice as large for the same
-density and half the repeats, the wood at its true 55cm. The ARM map is 512
-on all of them, because roughness is smooth at that scale. Altogether about
-5MB, of which the 2K variants are 3.4MB that only the high tier fetches.
+smaller tiles. The 1024 maps serve every tier; all three also have 2048
+variants for the high tier, built from the 4K leather and cloth downloads,
+which tile twice as large for the same density and half the repeats, the
+wood at its true 55cm. The leather's was tested against its 1024 map on the
+reveal shot: the pebble grain resolves where the 1024 map is smooth, a mean
+difference of 6 levels across the wall. The ARM map is 512 on all of them,
+because roughness is smooth at that scale. Altogether about 7MB, of which
+the 2K variants are 5.9MB that only the high tier fetches.
 
 The cloth was photographed in a saturated blue, and a material tint can only
 darken a map, never pull it toward the slate the dice and swatches were tuned
@@ -1555,6 +1583,9 @@ tinted: the photograph is dark already and the vignette and fog take the
 edges down further.
 
 ## Credits
+
+Coin metal: [Metal007](https://ambientcg.com/view?id=Metal007) from
+[ambientCG](https://ambientcg.com), CC0.
 
 Tray surfaces: [brown_leather](https://polyhaven.com/a/brown_leather),
 [terry_cloth](https://polyhaven.com/a/terry_cloth) and

@@ -138,7 +138,7 @@ export async function loadTrayTextures(anisotropy: number, large = false): Promi
     return { map, normalMap, armMap };
   };
   try {
-    const [leather, felt, wood] = await Promise.all([surface('leather', false), surface('felt', true), surface('wood', true)]);
+    const [leather, felt, wood] = await Promise.all([surface('leather', true), surface('felt', true), surface('wood', true)]);
     return { leather, felt, wood };
   } catch {
     return null;

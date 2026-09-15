@@ -1,5 +1,6 @@
 /**
- * Builds the tray's surface maps from Poly Haven's CC0 textures.
+ * Builds the tray's surface maps from Poly Haven's CC0 textures, and the
+ * coin's metal from ambientCG's (see buildCoinMetal below).
  *
  *   leather  brown_leather     the walls        https://polyhaven.com/a/brown_leather
  *   felt     terry_cloth       the floor        https://polyhaven.com/a/terry_cloth
@@ -43,7 +44,7 @@ const QUALITY = { diff: 82, normal: 90, arm: 80 };
  * The felt is under the dice in the closest shot and the wood fills most of
  * the wide one; the leather is seen at a slant and 1024 is enough for it.
  */
-const LARGE = new Set(['felt', 'wood']);
+const LARGE = new Set(['felt', 'wood', 'leather']);
 /** Surfaces whose diffuse is neutralised so the material's colour paints them. */
 const NEUTRAL = new Set(['felt']);
 
@@ -179,6 +180,72 @@ async function build(name, id, files) {
   return true;
 }
 
+/**
+ * The coin's metal: ambientCG's Metal007 (CC0), a polished gold with faint
+ * scratches, packed into one RGBA tile in public/dice/ for the coin shader —
+ * red and green the normal's slopes in the coin's convention, blue the
+ * roughness and alpha the albedo, both scaled to a mean of half grey so they
+ * read as variation about whatever the metal's own colour and polish are.
+ * The coin recolours it per metal; the photograph's gold is not used.
+ */
+const COIN_METAL = 'metal007';
+const COIN_METAL_SIZE = 1024;
+const COIN_METAL_SLOPE_MAX = 0.1;
+
+async function buildCoinMetal(files) {
+  const find = (kind) => files.find((f) => path.basename(f).toLowerCase().startsWith(COIN_METAL) && new RegExp(`_${kind}\\.`, 'i').test(path.basename(f)));
+  const color = find('color');
+  const normal = find('normalgl');
+  const rough = find('roughness');
+  if (!color || !normal || !rough) {
+    console.log(`  coin metal: ${COIN_METAL} not found — skipped`);
+    return false;
+  }
+  const size = COIN_METAL_SIZE;
+  const n = size * size;
+  const grey = await resize(color, size).greyscale().raw().toBuffer();
+  const roughness = await resize(rough, size).greyscale().raw().toBuffer();
+  const normals = await resize(normal, size).removeAlpha().raw().toBuffer();
+  const mean = (buffer, stride = 1) => {
+    let sum = 0;
+    for (let i = 0; i < buffer.length; i += stride) sum += buffer[i];
+    return sum / (buffer.length / stride);
+  };
+  const greyScale = 128 / mean(grey);
+  const roughScale = 128 / mean(roughness);
+  // A normal n stands on a height h with n ∝ (-h_x, -h_up, 1); the map's rows
+  // run down, so the slope along a row is the negative of the slope up. The
+  // mean slope is taken out: a photograph's slight overall tilt would tilt the
+  // whole coin.
+  const slopes = new Float32Array(n * 2);
+  let meanU = 0;
+  let meanV = 0;
+  for (let i = 0; i < n; i++) {
+    const nx = normals[i * 3] / 127.5 - 1;
+    const ny = normals[i * 3 + 1] / 127.5 - 1;
+    const nz = Math.max(0.05, normals[i * 3 + 2] / 127.5 - 1);
+    slopes[i * 2] = -nx / nz;
+    slopes[i * 2 + 1] = ny / nz;
+    meanU += slopes[i * 2];
+    meanV += slopes[i * 2 + 1];
+  }
+  meanU /= n;
+  meanV /= n;
+  const out = Buffer.alloc(n * 4);
+  for (let i = 0; i < n; i++) {
+    const su = slopes[i * 2] - meanU;
+    const sv = slopes[i * 2 + 1] - meanV;
+    out[i * 4] = Math.round(128 + 127 * Math.max(-1, Math.min(1, su / COIN_METAL_SLOPE_MAX)));
+    out[i * 4 + 1] = Math.round(128 + 127 * Math.max(-1, Math.min(1, sv / COIN_METAL_SLOPE_MAX)));
+    out[i * 4 + 2] = Math.min(255, Math.round(roughness[i] * roughScale));
+    out[i * 4 + 3] = Math.min(255, Math.round(grey[i] * greyScale));
+  }
+  const file = 'public/dice/coin-metal.webp';
+  await sharp(out, { raw: { width: size, height: size, channels: 4 } }).webp({ quality: 90 }).toFile(file);
+  console.log(`  coin metal (${COIN_METAL}): ${(fs.statSync(file).size / 1024).toFixed(0)} KB`);
+  return true;
+}
+
 let files;
 if (download) {
   console.log('downloading from Poly Haven');
@@ -195,6 +262,7 @@ if (download) {
 
 let built = 0;
 for (const [name, id] of Object.entries(ASSETS)) if (await build(name, id, files)) built++;
+await buildCoinMetal(files);
 fs.rmSync(work, { recursive: true, force: true });
 console.log(built === Object.keys(ASSETS).length ? 'all tray maps built' : `${built} of ${Object.keys(ASSETS).length} built`);
 if (built < Object.keys(ASSETS).length) process.exit(1);
