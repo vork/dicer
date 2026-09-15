@@ -44,6 +44,8 @@ const QUALITY = { diff: 82, normal: 90, arm: 80 };
  * the wide one; the leather is seen at a slant and 1024 is enough for it.
  */
 const LARGE = new Set(['felt', 'wood']);
+/** Surfaces whose diffuse is neutralised so the material's colour paints them. */
+const NEUTRAL = new Set(['felt']);
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => {
@@ -127,10 +129,25 @@ async function build(name, id, files) {
     return false;
   }
 
-  await resize(maps.diff.file, SIZE.diff).webp({ quality: QUALITY.diff }).toFile(path.join(OUT, `${name}-diff.webp`));
+  // The felt's colour belongs to the tray, not to the photograph: the cloth
+  // was shot in a saturated blue that a tint can only darken, never pull
+  // toward the slate the dice and swatches were tuned against. So its diffuse
+  // is neutralised — greyscale, scaled to a mean of half grey — and the
+  // material's colour paints it.
+  const diffuse = async (size) => {
+    const image = resize(maps.diff.file, size);
+    if (!NEUTRAL.has(name)) return image;
+    const grey = await image.greyscale().raw().toBuffer();
+    let sum = 0;
+    for (let i = 0; i < grey.length; i++) sum += grey[i];
+    const scale = 128 / (sum / grey.length);
+    for (let i = 0; i < grey.length; i++) grey[i] = Math.min(255, Math.round(grey[i] * scale));
+    return sharp(grey, { raw: { width: size, height: size, channels: 1 } });
+  };
+  await (await diffuse(SIZE.diff)).webp({ quality: QUALITY.diff }).toFile(path.join(OUT, `${name}-diff.webp`));
   await resize(maps.normal.file, SIZE.normal).webp({ quality: QUALITY.normal }).toFile(path.join(OUT, `${name}-normal.webp`));
   if (LARGE.has(name) && maps.diff.size >= 2048 && maps.normal.size >= 2048) {
-    await resize(maps.diff.file, 2048).webp({ quality: QUALITY.diff }).toFile(path.join(OUT, `${name}-diff-2k.webp`));
+    await (await diffuse(2048)).webp({ quality: QUALITY.diff }).toFile(path.join(OUT, `${name}-diff-2k.webp`));
     await resize(maps.normal.file, 2048).webp({ quality: QUALITY.normal }).toFile(path.join(OUT, `${name}-normal-2k.webp`));
   }
 

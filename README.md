@@ -1536,11 +1536,23 @@ tile spans about 6cm, so the felt tiles every 3.5 units (7cm), the leather
 every 5 (10cm), and the wood, which is far away and fogged, every 20 (40cm).
 The terry loops come out far finer than life, which is what makes the cloth
 read as felt nap; the leather grain is ten times finer than life and reads as
-fine-grained leather; the planks stay near life size. The diffuse and normal
-maps are 1024 and the ARM map 512, because roughness is smooth at that scale;
-2K would cost four times the memory and bandwidth on every tier for repeats
-that do not show. The floor's baked occlusion (see "Ambient occlusion") is
-kept as its `aoMap` on the second UV set, above the cloth's own.
+fine-grained leather; the planks stay near life size. The sources are 2K —
+the leather 51.2, the cloth 55.8 and the wood 37.2 pixels a centimetre —
+which at life-size tiling would be under 30 texels a centimetre, hence the
+smaller tiles. The 1024 maps serve every tier; the felt and the wood also
+have 2048 variants for the high tier, which tile twice as large for the same
+density and half the repeats, the wood at its true 55cm. The ARM map is 512
+on all of them, because roughness is smooth at that scale. Altogether about
+5MB, of which the 2K variants are 3.4MB that only the high tier fetches.
+
+The cloth was photographed in a saturated blue, and a material tint can only
+darken a map, never pull it toward the slate the dice and swatches were tuned
+against. So the build neutralises the felt's diffuse — greyscale, scaled to a
+mean of half grey — and the material's colour paints it, doubled to undo the
+map's mean. The floor's baked occlusion (see "Ambient occlusion") is kept as
+its `aoMap` on the second UV set, above the cloth's own. The wood is barely
+tinted: the photograph is dark already and the vignette and fog take the
+edges down further.
 
 ## Credits
 

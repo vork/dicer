@@ -145,8 +145,10 @@ export function createTray(textures: TrayTextures | null = null): Tray {
 
   // --- floor -------------------------------------------------------------
   const floorMaterial = new THREE.MeshPhysicalMaterial({
-    // The cloth's own colour is near white; this tints it to the tray's felt.
-    color: textures ? 0x2a3a4e : 0x17202c,
+    // The cloth's diffuse is neutralised to half grey by the build, so this is
+    // the felt's colour: the slate of the procedural felt, doubled to undo the
+    // map's mean.
+    color: textures ? 0x2e4058 : 0x17202c,
     roughness: 1,
     metalness: 0,
     map: textures?.felt.map ?? null,
@@ -259,8 +261,9 @@ export function createTray(textures: TrayTextures | null = null): Tray {
 
   // --- ground the tray on something, so it is not floating in a void --------
   const groundMaterial = new THREE.MeshPhysicalMaterial({
-    // A worn table under the tray, kept dark so the tray still owns the light.
-    color: textures ? 0x5a5550 : 0x08080b,
+    // A worn table under the tray. The photograph is dark already, and the
+    // vignette and fog take the edges down further, so it is barely tinted.
+    color: textures ? 0xa09890 : 0x08080b,
     roughness: textures ? 1 : 0.72,
     metalness: textures ? 0 : 0.15,
     map: textures?.wood.map ?? null,
@@ -272,7 +275,7 @@ export function createTray(textures: TrayTextures | null = null): Tray {
   // The ground covers more of the frame than anything else, so on a slow GPU
   // it is the cheapest shader that still shows the wood.
   const groundLite = new THREE.MeshLambertMaterial({
-    color: textures ? 0x5a5550 : 0x08080b,
+    color: textures ? 0xa09890 : 0x08080b,
     map: textures?.wood.map ?? null,
   });
   const ground = new THREE.Mesh<THREE.BufferGeometry, THREE.Material>(new THREE.CircleGeometry(GROUND_DIAMETER / 2, 64), groundMaterial);
