@@ -1,7 +1,14 @@
 import * as THREE from 'three';
 import type RAPIER from '@dimforge/rapier3d-compat';
 
-import { loadDiceAssets, loadSetTextures, loadTrayTextures, type DiceAssets, type DiceSet } from './assets';
+import {
+  loadClearcoatDetail,
+  loadDiceAssets,
+  loadSetTextures,
+  loadTrayTextures,
+  type DiceAssets,
+  type DiceSet,
+} from './assets';
 import { createEnvironment, createLights } from './scene/environment';
 import { createTray, TRAY, type Tray } from './scene/tray';
 import { createDiceMaterial, type DiceMaterial, type FlakeSettings } from './scene/dice-material';
@@ -92,6 +99,7 @@ export class App {
   private dice!: DiceMaterial;
   private coin!: CoinMaterial;
   private tray!: Tray;
+  private clearcoatDetail: THREE.Texture | null = null;
   private diceMaterial!: THREE.MeshPhysicalMaterial;
 
   private activeSet!: DiceSet;
@@ -160,11 +168,13 @@ export class App {
     // Rapier inlines its wasm as base64, which is most of the bundle. Importing it
     // dynamically puts it in its own chunk that loads alongside the dice assets.
     const anisotropy = Math.min(this.quality.anisotropy, this.renderer.capabilities.getMaxAnisotropy());
-    const [rapier, assets, trayTextures] = await Promise.all([
+    const [rapier, assets, trayTextures, clearcoatDetail] = await Promise.all([
       loadRapier(),
       loadDiceAssets(),
       loadTrayTextures(anisotropy, this.quality.largeTrayMaps),
+      loadClearcoatDetail(anisotropy),
     ]);
+    this.clearcoatDetail = clearcoatDetail;
     this.rapier = rapier;
     this.assets = assets;
     this.activeSet = this.assets.sets[0];
@@ -178,10 +188,12 @@ export class App {
 
     this.tray = createTray(trayTextures);
     this.tray.setDetail(this.quality.trayDetail);
+    this.tray.setMicroDetail(this.quality.microDetail);
     this.scene.add(this.tray.group);
 
     this.dice = createDiceMaterial();
     this.diceMaterial = this.dice.material;
+    this.dice.setClearcoatDetail(this.quality.microDetail ? this.clearcoatDetail : null);
     this.coin = createCoinMaterial(
       undefined,
       this.assets.info.coin.inradius,
@@ -358,6 +370,8 @@ export class App {
     this.shadowFramesDue = 2;
     this.coin?.setDetail(this.quality.coinDetail);
     this.tray?.setDetail(this.quality.trayDetail);
+    this.tray?.setMicroDetail(this.quality.microDetail);
+    this.dice?.setClearcoatDetail(this.quality.microDetail ? this.clearcoatDetail : null);
     this.postFx?.configure(this.quality);
     this.handleResize();
   }
@@ -590,6 +604,10 @@ export class App {
         };
       },
       setCoinDetail: (detail: 'full' | 'lite') => this.coin.setDetail(detail),
+      setMicroDetail: (enabled: boolean) => {
+        this.tray.setMicroDetail(enabled);
+        this.dice.setClearcoatDetail(enabled ? this.clearcoatDetail : null);
+      },
       configurePost: (options: Partial<PostFxOptions>) => this.postFx.configure(options),
       postOptions: () => this.postFx.options(),
       stepTimes: () => this.stepTimes.slice(),

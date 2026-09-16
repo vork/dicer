@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { createFeltMaps, createLeatherMaps } from './textures';
 import { applyFloorAoUv, createTrayFloorAo } from './tray-ao';
 import type { TrayTextures } from '../assets';
+import { addDetailLayer, type DetailLayer } from './detail';
 
 /**
  * How big one tile of each Poly Haven map is on the tray, in world units (one
@@ -22,6 +23,19 @@ const TILE_UNITS = {
   felt: 3.5,
   leather: 5,
   wood: 13.75,
+};
+
+/**
+ * One tile of each micro detail map, in world units — a centimetre or two,
+ * matching tools/build-detail.mjs. How much of it shows: the slopes are
+ * height per unit and already physical, so the bump is one; the tone and
+ * roughness variations are kept subtle.
+ */
+const DETAIL_TILE_UNITS = { felt: 1.0, leather: 0.75, wood: 1.0 };
+const DETAIL_LOOK = {
+  felt: { bump: 1.4, rough: 0.5, tint: 0.9 },
+  leather: { bump: 1.0, rough: 0.6, tint: 0.6 },
+  wood: { bump: 0.8, rough: 0.5, tint: 0.6 },
 };
 
 /**
@@ -88,6 +102,8 @@ export interface Tray {
    * scene pass on the lowest tier.
    */
   setDetail(detail: TrayDetail): void;
+  /** The micro detail tiles under the felt, leather and wood: one texture tap each. */
+  setMicroDetail(enabled: boolean): void;
   dispose(): void;
 }
 
@@ -127,12 +143,27 @@ export function createTray(textures: TrayTextures | null = null): Tray {
   // built (tools/build-textures.mjs).
   const felt = createFeltMaps(512, 0.7);
   const leather = createLeatherMaps();
+  const mapTileUnits: Record<keyof typeof TILE_UNITS, number> = { felt: 0, leather: 0, wood: 0 };
   const tile = (surface: keyof typeof TILE_UNITS, perUnit: number) => {
     const maps = textures?.[surface];
     if (!maps) return;
     const width = (maps.map.image as { width?: number } | undefined)?.width ?? 1024;
-    const repeat = perUnit / (TILE_UNITS[surface] * (width / 1024));
+    mapTileUnits[surface] = TILE_UNITS[surface] * (width / 1024);
+    const repeat = perUnit / mapTileUnits[surface];
     for (const map of [maps.map, maps.normalMap, maps.armMap]) map.repeat.set(repeat, repeat);
+  };
+  const layers: DetailLayer[] = [];
+  const detailOn = (surface: keyof typeof TILE_UNITS, material: THREE.MeshPhysicalMaterial) => {
+    const map = textures?.detail[surface];
+    if (!map || !mapTileUnits[surface]) return;
+    layers.push(
+      addDetailLayer(material, {
+        map,
+        // Detail tiles per diffuse tile.
+        scale: mapTileUnits[surface] / DETAIL_TILE_UNITS[surface],
+        ...DETAIL_LOOK[surface],
+      }),
+    );
   };
   // The floor's UVs are world units; the wall's box UVs are 0.28 tiles a unit;
   // the ground's run 0..1 across its 140-unit circle.
@@ -167,6 +198,7 @@ export function createTray(textures: TrayTextures | null = null): Tray {
   // map must not tile, so it gets a set of its own. `aoMap` reads uv1 by default.
   applyFloorAoUv(floorGeometry, inner.w, inner.d);
   floorMaterial.aoMap = createTrayFloorAo(inner.w, inner.d, TRAY.wallHeight);
+  detailOn('felt', floorMaterial);
   const floor = new THREE.Mesh(floorGeometry, floorMaterial);
   floor.rotation.x = -Math.PI / 2;
   floor.position.y = TRAY.floorY;
@@ -208,6 +240,7 @@ export function createTray(textures: TrayTextures | null = null): Tray {
     envMapIntensity: 0.85,
   });
 
+  detailOn('leather', wallMaterial);
   const walls = new THREE.Mesh(wallGeometry, wallMaterial);
   walls.castShadow = true;
   walls.receiveShadow = true;
@@ -278,6 +311,7 @@ export function createTray(textures: TrayTextures | null = null): Tray {
     color: textures ? 0xa09890 : 0x08080b,
     map: textures?.wood.map ?? null,
   });
+  detailOn('wood', groundMaterial);
   const ground = new THREE.Mesh<THREE.BufferGeometry, THREE.Material>(new THREE.CircleGeometry(GROUND_DIAMETER / 2, 64), groundMaterial);
   ground.rotation.x = -Math.PI / 2;
   ground.position.y = TRAY.floorY - 0.78;
@@ -290,6 +324,9 @@ export function createTray(textures: TrayTextures | null = null): Tray {
 
   return {
     group,
+    setMicroDetail(enabled) {
+      for (const layer of layers) layer.setEnabled(enabled);
+    },
     setDetail(next) {
       if (next === detail) return;
       detail = next;
@@ -311,11 +348,12 @@ export function createTray(textures: TrayTextures | null = null): Tray {
       leather.normalMap.dispose();
       leather.roughnessMap.dispose();
       if (textures) {
-        for (const surface of Object.values(textures)) {
+        for (const surface of [textures.leather, textures.felt, textures.wood]) {
           surface.map.dispose();
           surface.normalMap.dispose();
           surface.armMap.dispose();
         }
+        for (const map of Object.values(textures.detail)) map?.dispose();
       }
     },
   };

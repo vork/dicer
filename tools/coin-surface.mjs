@@ -46,7 +46,7 @@ export const MICRO_SLOPE_MAX = 0.5;
  */
 export const MICRO_TILES_AROUND = 34;
 
-function mulberry32(seed) {
+export function mulberry32(seed) {
   let a = seed >>> 0;
   return () => {
     a = (a + 0x6d2b79f5) >>> 0;
@@ -478,7 +478,7 @@ export function bakeEdge({ width, height: rows, rim, top, seed }) {
 }
 
 /** Periodic 2D value noise over a lattice of `period` cells, for a tile that wraps. */
-function periodicNoise(x, y, period, seed) {
+export function periodicNoise(x, y, period, seed) {
   const ix = Math.floor(x), iy = Math.floor(y);
   const fx = smooth(x - ix), fy = smooth(y - iy);
   const at = (i, j) => hash3(((i % period) + period) % period, ((j % period) + period) % period, seed);
@@ -486,7 +486,7 @@ function periodicNoise(x, y, period, seed) {
 }
 
 /** Stamps into a tile that wraps in both directions. */
-function stampWrapped(height, mask, maskWeight, size, cx, cy, reach, profileAt) {
+export function stampWrapped(height, mask, maskWeight, size, cx, cy, reach, profileAt) {
   for (let py = Math.floor(cy - reach); py <= Math.ceil(cy + reach); py++) {
     for (let px = Math.floor(cx - reach); px <= Math.ceil(cx + reach); px++) {
       const { depth, weight } = profileAt(px, py);

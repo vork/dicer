@@ -1503,6 +1503,7 @@ pose, not the antialiasing.
 | `npm run build` | typecheck + production build |
 | `npm run assets` | regenerate `public/dice/*` from the source GLB |
 | `npm run textures` | build the tray's and the coin's WebP maps from Poly Haven and ambientCG downloads (`--download`, or `--source <dir>`) |
+| `npm run detail` | bake the procedural micro detail tiles for the felt, leather, wood and the dice's clear coat |
 | `npm run verify` | values, reading, camera and physics |
 | `npm run verify:values` | opposite-face-sum invariant on the tables |
 | `npm run verify:reading` | every slot reads back from every yaw, and pool resolution |
@@ -1581,6 +1582,41 @@ map's mean. The floor's baked occlusion (see "Ambient occlusion") is kept as
 its `aoMap` on the second UV set, above the cloth's own. The wood is barely
 tinted: the photograph is dark already and the vignette and fog take the
 edges down further.
+
+## Micro detail
+
+Under the tray's photographed surfaces, and over the dice's clear coat, there
+is a second layer of grain finer than any atlas holds: small seamless tiles
+laid at a fixed physical size of a centimetre or two, the way the coin's
+micro tile has been all along. `tools/build-detail.mjs` bakes them, all
+procedural and deterministic:
+
+- **felt** — a nap of tufts lying every way, in clumps, on a fuzz. Not at a
+  fibre's true scale: a real felt fibre is twenty microns across and would be
+  a fraction of a pixel at the closest view the app ever takes, about 170
+  screen pixels a centimetre in the reveal, where the mip chain averages it
+  to nothing. What reads as felt there is the nap's clumping at a third of a
+  millimetre to a millimetre, so the tufts are that size, on a 2cm tile.
+- **leather** — pebbles at two sizes, creased and rougher between, on a
+  1.5cm tile.
+- **wood** — fibres running along the grain and pores cut along them, on a
+  2cm tile.
+- **clear coat** — orange peel and hairline scratches, as a tangent-space
+  normal map tiled twelve times across the dice atlas.
+
+The tray tiles carry height slopes per world unit in red and green, a
+roughness variation in blue and a tone variation in alpha, the last two
+about half grey so the material's own values are the mean. Three has no
+detail slot, so `src/scene/detail.ts` patches the three tray materials the
+way the coin's is patched: one texture tap ahead of the colour, roughness
+and normal chunks, each taking its part, with the normal tilted in the
+tangent frame three has already built for the material's own normal map so
+the two keep one handedness. The mip chain fades the tilt out with distance
+on its own — averaged normals flatten — so the wide shot shows no shimmer.
+The dice use three's own clear coat normal slot, which needs no patch.
+
+The layer is on for the high and medium tiers and off on low, where its one
+tap a pixel across the ground would not be free.
 
 ## Credits
 

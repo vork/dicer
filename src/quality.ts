@@ -66,6 +66,8 @@ export interface QualitySettings {
   trayDetail: 'full' | 'lite';
   /** 2048 maps for the felt and the wood, where they are built; 1024 otherwise. */
   largeTrayMaps: boolean;
+  /** The micro detail tiles under the tray's surfaces and over the dice's clear coat. */
+  microDetail: boolean;
   /** Frames skipped between rendered ones while nothing is moving. */
   idleFrameSkip: number;
 }
@@ -87,6 +89,7 @@ export const QUALITY: Record<QualityTier, QualitySettings> = {
     coinDetail: 'full',
     trayDetail: 'full',
     largeTrayMaps: true,
+    microDetail: true,
     idleFrameSkip: 0,
   },
   medium: {
@@ -105,6 +108,7 @@ export const QUALITY: Record<QualityTier, QualitySettings> = {
     coinDetail: 'full',
     trayDetail: 'full',
     largeTrayMaps: false,
+    microDetail: true,
     idleFrameSkip: 0,
   },
   low: {
@@ -123,6 +127,7 @@ export const QUALITY: Record<QualityTier, QualitySettings> = {
     coinDetail: 'lite',
     trayDetail: 'lite',
     largeTrayMaps: false,
+    microDetail: false,
     idleFrameSkip: 1,
   },
 };

@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "assets": "node tools/build-assets.mjs",
     "textures": "node tools/build-textures.mjs",
+    "detail": "node tools/build-detail.mjs",
     "fonts": "node tools/build-fonts.mjs",
     "icons": "node tools/build-icons.mjs",
     "verify": "npm run verify:values && npm run verify:reading && npm run verify:camera && npm run verify:physics",

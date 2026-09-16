@@ -92,7 +92,16 @@ export interface DiceMaterial {
   material: THREE.MeshPhysicalMaterial;
   setFlakes(settings: Partial<FlakeSettings>): void;
   getFlakes(): FlakeSettings;
+  /**
+   * The clear coat's own surface: orange peel and hairlines, a seamless tile
+   * from tools/build-detail.mjs laid over the atlas, so the coat's reflection
+   * of the room breaks up the way a cast resin's does. Null takes it off.
+   */
+  setClearcoatDetail(map: THREE.Texture | null): void;
 }
+
+/** Tiles of the clear coat map across the dice atlas. */
+const CLEARCOAT_DETAIL_REPEAT = 12;
 
 export function createDiceMaterial(flakeSettings?: Partial<FlakeSettings>): DiceMaterial {
   const flakes: FlakeSettings = { ...DEFAULT_FLAKES, ...flakeSettings };
@@ -137,8 +146,17 @@ export function createDiceMaterial(flakeSettings?: Partial<FlakeSettings>): Dice
       .replace('#include <opaque_fragment>', `${FLAKE_FRAGMENT}\n#include <opaque_fragment>`);
   };
 
+  let clearcoatDetail: THREE.Texture | null = null;
   return {
     material,
+    setClearcoatDetail(map) {
+      if (map === clearcoatDetail) return;
+      clearcoatDetail = map;
+      if (map) map.repeat.set(CLEARCOAT_DETAIL_REPEAT, CLEARCOAT_DETAIL_REPEAT);
+      material.clearcoatNormalMap = map;
+      material.clearcoatNormalScale.set(0.25, 0.25);
+      material.needsUpdate = true;
+    },
     setFlakes(next) {
       Object.assign(flakes, next);
       uniforms.uFlakeStrength.value = flakes.strength;
