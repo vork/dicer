@@ -71,6 +71,8 @@ export interface CoinSettings {
   metalBump: number;
   metalTint: number;
   metalRough: number;
+  /** Fingerprints and smudges on the metal, as roughness: how much they show. */
+  smudges: number;
 }
 
 export const DEFAULT_COIN: CoinSettings = {
@@ -88,7 +90,15 @@ export const DEFAULT_COIN: CoinSettings = {
   metalBump: 3.0,
   metalTint: 1.0,
   metalRough: 0.5,
+  smudges: 1.0,
 };
+
+/** One tile of the fingerprint map across this many coin units on the faces. */
+const COIN_SMUDGE_TILE_UNITS = 1.2;
+/** Whole tiles of it around the edge: the circumference is 3.97 units. */
+const COIN_SMUDGE_TILES_AROUND = 3;
+/** The map's clean baseline; anything above it is a print or a wipe. */
+const COIN_SMUDGE_BASE = 0.37;
 
 /** One tile of the photographed metal across this many coin units on the faces. */
 const COIN_METAL_TILE_UNITS = 2.5;
@@ -263,6 +273,9 @@ uniform float uCoinPatina;
 uniform float uCoinPits;
 uniform float uCoinMicro;
 uniform sampler2D uCoinMetalMap;
+uniform sampler2D uCoinSmudgeMap;
+uniform float uCoinSmudgeTile;
+uniform float uCoinSmudges;
 uniform float uCoinMetalTile;
 uniform float uCoinMetalBump;
 uniform float uCoinMetalTint;
@@ -477,6 +490,12 @@ vec4 coinMetalTexel = mix(texture2D(uCoinMetalMap, coinMetalFaceUv), texture2D(u
 coinSurface.xy += (coinMetalTexel.rg * 2.0 - 1.0) * COIN_METAL_SLOPE_MAX * uCoinMetalBump;
 float coinMetalTone = mix(1.0, coinMetalTexel.a * 2.0, uCoinMetalTint);
 float coinMetalRough = (coinMetalTexel.b - 0.5) * uCoinMetalRough;
+// Fingerprints: oil on the metal, which does nothing to its colour and a
+// great deal to its polish. Sampled the same two ways.
+vec2 coinSmudgeFaceUv = coinP.xz / uCoinSmudgeTile;
+vec2 coinSmudgeEdgeUv = vec2((coinAngle / (2.0 * PI)) * float(${COIN_SMUDGE_TILES_AROUND}), coinP.y / uCoinSmudgeTile);
+float coinSmudgeTexel = mix(texture2D(uCoinSmudgeMap, coinSmudgeFaceUv).g, texture2D(uCoinSmudgeMap, coinSmudgeEdgeUv).g, coinSideness);
+float coinSmudge = uCoinSmudges * max(0.0, coinSmudgeTexel - ${COIN_SMUDGE_BASE.toFixed(2)}) / ${(1 - COIN_SMUDGE_BASE).toFixed(2)};
 float coinScratch = uCoinScratches * coinSurface.z;
 float coinPit = uCoinPits * coinSurface.w;
 float coinMicroMark = 0.7 * coinMicro.z + coinMicro.w;
@@ -535,6 +554,9 @@ roughnessFactor += 0.16 * coinScratch + 0.3 * coinPit + 0.16 * coinPatina + 0.12
 // step in brightness and the mottle drew as camouflage.
 roughnessFactor += coinRoughnessDetail(coinP, coinFootprint) * (1.0 - 0.6 * coinSideness);
 roughnessFactor += coinMetalRough;
+// A print is only where the metal was polished enough to show it: on the
+// rubbed high points and the clean field, not in the grime.
+roughnessFactor += 0.3 * coinSmudge * (1.0 - 0.5 * coinDull);
 roughnessFactor = mix(roughnessFactor, 0.85, coinGrime);
 // Never a true mirror. Much below this the domed edges of the relief, which
 // face every direction, find the exact mirror angle of the spotlight somewhere
@@ -599,6 +621,9 @@ export function createCoinMaterial(
   // tilts nothing and varies nothing.
   const neutralMetal = new THREE.DataTexture(new Uint8Array([128, 128, 128, 128]), 1, 1, THREE.RGBAFormat);
   neutralMetal.needsUpdate = true;
+  const cleanLevel = Math.round(255 * COIN_SMUDGE_BASE);
+  const neutralSmudge = new THREE.DataTexture(new Uint8Array([cleanLevel, cleanLevel, cleanLevel, 255]), 1, 1, THREE.RGBAFormat);
+  neutralSmudge.needsUpdate = true;
   // Clean until the map arrives: a single texel as far from any wall as the map
   // can say.
   const clean = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
@@ -619,6 +644,9 @@ export function createCoinMaterial(
     uCoinMetalBump: { value: coin.metalBump },
     uCoinMetalTint: { value: coin.metalTint },
     uCoinMetalRough: { value: coin.metalRough },
+    uCoinSmudgeMap: { value: neutralSmudge as THREE.Texture },
+    uCoinSmudgeTile: { value: COIN_SMUDGE_TILE_UNITS },
+    uCoinSmudges: { value: coin.smudges },
     uCoinGrime: { value: coin.grime },
     uCoinPolish: { value: coin.polish },
     uCoinWearAmount: { value: coin.wear },
@@ -700,6 +728,12 @@ export function createCoinMaterial(
       })
       // Not built: the neutral texel stays, and the coin is as it was.
       .catch(() => undefined),
+    load('smudge-detail.webp', THREE.RepeatWrapping, true)
+      .then((t) => {
+        t.wrapT = THREE.RepeatWrapping;
+        uniforms.uCoinSmudgeMap.value = t;
+      })
+      .catch(() => undefined),
   ]).then(() => undefined);
 
   return {
@@ -720,6 +754,7 @@ export function createCoinMaterial(
       uniforms.uCoinMetalBump.value = coin.metalBump;
       uniforms.uCoinMetalTint.value = coin.metalTint;
       uniforms.uCoinMetalRough.value = coin.metalRough;
+      uniforms.uCoinSmudges.value = coin.smudges;
       applyMetal();
     },
     getCoin: () => ({ ...coin }),

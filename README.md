@@ -1568,9 +1568,11 @@ which at life-size tiling would be under 30 texels a centimetre, hence the
 smaller tiles. The 1024 maps serve every tier; all three also have 2048
 variants for the high tier, built from the 4K leather and cloth downloads,
 which tile twice as large for the same density and half the repeats, the
-wood at its true 55cm. The leather's was tested against its 1024 map on the
-reveal shot: the pebble grain resolves where the 1024 map is smooth, a mean
-difference of 6 levels across the wall. The ARM map is 512 on all of them,
+wood at its true 55cm — except the leather's, which keeps its 10cm tile at
+2048 for twice the texels a centimetre, since it is the surface the eye lands
+on up close. Tested against its 1024 map on the reveal shot, the pebble grain
+resolves where the 1024 map is smooth, a mean difference of 6 levels across
+the wall. The ARM map is 512 on all of them,
 because roughness is smooth at that scale. Altogether about 7MB, of which
 the 2K variants are 5.9MB that only the high tier fetches.
 
@@ -1603,6 +1605,17 @@ procedural and deterministic:
   2cm tile.
 - **clear coat** — orange peel and hairline scratches, as a tangent-space
   normal map tiled twelve times across the dice atlas.
+- **fingerprints and smudges** — a roughness map: prints as near-parallel
+  arcs of ridges a third of a millimetre apart, bent by a slow warp so no two
+  agree and broken where the skin did not touch, inside ragged ovals; a thin
+  oily haze in patches; a few feathered wipes. Its baseline is 0.37 of one,
+  so a coat's own roughness divided by that is the clean value and a print
+  rises toward the full one. The dice take it as the clear coat's roughness
+  map, tiled at a different count from the peel so neither repeat shows; the
+  coin samples the same tile over its faces and edge and adds it to its
+  roughness where the metal is polished enough to show it. Oil does nothing
+  to a colour and a great deal to a polish, which is why a print on a glossy
+  coat or a coin is far more visible than any bump would be.
 
 The tray tiles carry height slopes per world unit in red and green, a
 roughness variation in blue and a tone variation in alpha, the last two
@@ -1617,6 +1630,15 @@ The dice use three's own clear coat normal slot, which needs no patch.
 
 The layer is on for the high and medium tiers and off on low, where its one
 tap a pixel across the ground would not be free.
+
+Two tunings came out of the close-ups. The felt lies flat to the light: the
+cloth's normal map, whose loops are five times finer than life here, is at
+half strength and the nap's bump at 0.6, with the tufts carried by their
+tone. And the leather's photographed grain leads: its 2K map keeps the 10cm
+tile rather than doubling it, 205 texels a centimetre against the reveal's
+170 screen pixels, where the doubled tile's 100 blurred past; the baked
+pebbles sit under it at half strength, and the hide's roughness map, dry at
+0.66, is scaled toward the satin a finished leather has.
 
 ## Credits
 

@@ -10,6 +10,7 @@
  *   public/tray/leather-detail.webp   the same
  *   public/tray/wood-detail.webp      the same
  *   public/dice/clearcoat-detail.webp a tangent-space normal map
+ *   public/dice/smudge-detail.webp    fingerprints and smudges, a roughness map
  *
  * Slopes are height differences per world unit, encoded about half grey and
  * clamped at DETAIL_SLOPE_MAX; roughness and tone are variations about half
@@ -215,6 +216,79 @@ function bakeClearcoat(seed) {
   return height;
 }
 
+/**
+ * Fingerprints and smudges, as a roughness map: the baseline sits at
+ * SMUDGE_BASE so a material's own clear coat roughness, divided by it, is the
+ * clean value, and the prints and wipes rise from there toward one. A print
+ * is a patch of ridges — near-parallel, gently curved, a third of a
+ * millimetre apart — bounded by a soft oval; a smudge is a broad soft patch
+ * of deposited oil; a wipe is a streak of it. All periodic.
+ */
+export const SMUDGE_BASE = 0.37;
+function bakeSmudge(seed) {
+  const random = mulberry32(seed);
+  const value = new Float64Array(SIZE * SIZE).fill(SMUDGE_BASE);
+  // The oily haze a handled surface carries: thin, uneven, in patches with
+  // ragged edges rather than blobs.
+  for (let py = 0; py < SIZE; py++) {
+    for (let px = 0; px < SIZE; px++) {
+      const u = px / SIZE, v = py / SIZE;
+      const broad = periodicNoise(u * 5, v * 5, 5, seed) - 0.5;
+      const mid = periodicNoise(u * 17, v * 17, 17, seed + 1) - 0.5;
+      const fine = periodicNoise(u * 61, v * 61, 61, seed + 2) - 0.5;
+      const haze = Math.max(0, broad * 1.4 + mid * 0.7 + fine * 0.3 - 0.1);
+      value[py * SIZE + px] += 0.22 * Math.min(1, haze * 2.5);
+    }
+  }
+  // Fingerprints. The ridges of a print run in near-parallel arcs — an arch
+  // or a loop — not in rings: the phase is a parabola across the print, bent
+  // by a slow warp so no two prints agree, and the ridges break where the
+  // skin did not touch.
+  for (let n = 0; n < 8; n++) {
+    const cx = random() * SIZE, cy = random() * SIZE;
+    const rx = 30 + random() * 34, ry = rx * (1.3 + random() * 0.5);
+    const angle = random() * Math.PI;
+    const spacing = 6 + random() * 2.5;
+    const strength = 0.4 + random() * 0.3;
+    const bend = (0.4 + random() * 0.8) / rx;
+    const warpSeed = seed + 10 + n;
+    const reach = Math.max(rx, ry) + 4;
+    for (let py = Math.floor(cy - reach); py <= Math.ceil(cy + reach); py++) {
+      for (let px = Math.floor(cx - reach); px <= Math.ceil(cx + reach); px++) {
+        const dx = px - cx, dy = py - cy;
+        const lx = dx * Math.cos(angle) + dy * Math.sin(angle);
+        const ly = -dx * Math.sin(angle) + dy * Math.cos(angle);
+        // A ragged oval: the print's edge is where the finger's pressure ran out.
+        const rag = 0.25 * (periodicNoise(px / 23, py / 23, 22, warpSeed + 100) - 0.5);
+        const oval = (lx * lx) / (rx * rx) + (ly * ly) / (ry * ry) + rag;
+        if (oval >= 1) continue;
+        const warp = (periodicNoise(px / 34, py / 34, 15, warpSeed) - 0.5) * spacing * 2.6;
+        const phase = ly + bend * lx * lx + warp;
+        const ridge = 0.5 + 0.5 * Math.cos((2 * Math.PI * phase) / spacing);
+        // Ridges break: a fine noise decides where the skin touched.
+        const touch = periodicNoise(px / 7, py / 7, 73, warpSeed + 50);
+        const contact = Math.min(1, Math.max(0, (touch - 0.3) * 3));
+        const edge = Math.min(1, (1 - oval) * 2.5);
+        const deposit = Math.pow(ridge, 2.2) * contact * edge * strength;
+        const i = wrap(py) * SIZE + wrap(px);
+        value[i] += deposit;
+      }
+    }
+  }
+  // Wipes: long feathered streaks where a thumb dragged.
+  for (let n = 0; n < 4; n++) {
+    stroke(value, random, { length: 140 + random() * 240, halfWidth: 9 + random() * 14, amplitude: 0.08 + random() * 0.08, direction: random() * Math.PI * 2 });
+  }
+  const out = Buffer.alloc(SIZE * SIZE * 3);
+  for (let i = 0; i < SIZE * SIZE; i++) {
+    const v = Math.round(255 * Math.max(0, Math.min(1, value[i])));
+    out[i * 3] = v;
+    out[i * 3 + 1] = v;
+    out[i * 3 + 2] = v;
+  }
+  return out;
+}
+
 /** Slopes by central difference, wrapping, with v taken upward. */
 function encodeSurface({ height, tone, rough, tile }) {
   const texel = tile / SIZE;
@@ -264,4 +338,5 @@ await write(encodeSurface(bakeFelt(11)), 4, 'public/tray/felt-detail.webp', 90);
 await write(encodeSurface(bakeLeather(23)), 4, 'public/tray/leather-detail.webp', 90);
 await write(encodeSurface(bakeWood(37)), 4, 'public/tray/wood-detail.webp', 90);
 await write(encodeNormal(bakeClearcoat(41), 0.9), 3, 'public/dice/clearcoat-detail.webp', 90);
+await write(bakeSmudge(53), 3, 'public/dice/smudge-detail.webp', 88);
 console.log('detail tiles baked');

@@ -5,6 +5,7 @@ import {
   loadClearcoatDetail,
   loadDiceAssets,
   loadSetTextures,
+  loadSmudgeDetail,
   loadTrayTextures,
   type DiceAssets,
   type DiceSet,
@@ -100,6 +101,7 @@ export class App {
   private coin!: CoinMaterial;
   private tray!: Tray;
   private clearcoatDetail: THREE.Texture | null = null;
+  private smudgeDetail: THREE.Texture | null = null;
   private diceMaterial!: THREE.MeshPhysicalMaterial;
 
   private activeSet!: DiceSet;
@@ -168,13 +170,15 @@ export class App {
     // Rapier inlines its wasm as base64, which is most of the bundle. Importing it
     // dynamically puts it in its own chunk that loads alongside the dice assets.
     const anisotropy = Math.min(this.quality.anisotropy, this.renderer.capabilities.getMaxAnisotropy());
-    const [rapier, assets, trayTextures, clearcoatDetail] = await Promise.all([
+    const [rapier, assets, trayTextures, clearcoatDetail, smudgeDetail] = await Promise.all([
       loadRapier(),
       loadDiceAssets(),
       loadTrayTextures(anisotropy, this.quality.largeTrayMaps),
       loadClearcoatDetail(anisotropy),
+      loadSmudgeDetail(anisotropy),
     ]);
     this.clearcoatDetail = clearcoatDetail;
+    this.smudgeDetail = smudgeDetail;
     this.rapier = rapier;
     this.assets = assets;
     this.activeSet = this.assets.sets[0];
@@ -193,7 +197,7 @@ export class App {
 
     this.dice = createDiceMaterial();
     this.diceMaterial = this.dice.material;
-    this.dice.setClearcoatDetail(this.quality.microDetail ? this.clearcoatDetail : null);
+    this.applyDiceDetail();
     this.coin = createCoinMaterial(
       undefined,
       this.assets.info.coin.inradius,
@@ -340,6 +344,11 @@ export class App {
     }
   }
 
+  private applyDiceDetail() {
+    const on = this.quality.microDetail;
+    this.dice.setClearcoatDetail(on ? this.clearcoatDetail : null, on ? this.smudgeDetail : null);
+  }
+
   /** The HUD's translucency and the CSS vignette follow the tier. */
   private applyQualityToDocument() {
     document.body.dataset.quality = this.quality.tier;
@@ -371,7 +380,7 @@ export class App {
     this.coin?.setDetail(this.quality.coinDetail);
     this.tray?.setDetail(this.quality.trayDetail);
     this.tray?.setMicroDetail(this.quality.microDetail);
-    this.dice?.setClearcoatDetail(this.quality.microDetail ? this.clearcoatDetail : null);
+    if (this.dice) this.applyDiceDetail();
     this.postFx?.configure(this.quality);
     this.handleResize();
   }
@@ -606,7 +615,7 @@ export class App {
       setCoinDetail: (detail: 'full' | 'lite') => this.coin.setDetail(detail),
       setMicroDetail: (enabled: boolean) => {
         this.tray.setMicroDetail(enabled);
-        this.dice.setClearcoatDetail(enabled ? this.clearcoatDetail : null);
+        this.dice.setClearcoatDetail(enabled ? this.clearcoatDetail : null, enabled ? this.smudgeDetail : null);
       },
       configurePost: (options: Partial<PostFxOptions>) => this.postFx.configure(options),
       postOptions: () => this.postFx.options(),

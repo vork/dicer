@@ -97,11 +97,18 @@ export interface DiceMaterial {
    * from tools/build-detail.mjs laid over the atlas, so the coat's reflection
    * of the room breaks up the way a cast resin's does. Null takes it off.
    */
-  setClearcoatDetail(map: THREE.Texture | null): void;
+  setClearcoatDetail(normal: THREE.Texture | null, smudge: THREE.Texture | null): void;
 }
 
-/** Tiles of the clear coat map across the dice atlas. */
+/** Tiles of the clear coat maps across the dice atlas. */
 const CLEARCOAT_DETAIL_REPEAT = 12;
+/**
+ * The clear coat's roughness with the smudge map on: the map's baseline is
+ * SMUDGE_BASE of one, so this times it is the clean coat's 0.26, and a
+ * fingerprint's ridges rise from there toward the full value.
+ */
+const CLEARCOAT_ROUGHNESS = 0.26;
+const SMUDGE_BASE = 0.37;
 
 export function createDiceMaterial(flakeSettings?: Partial<FlakeSettings>): DiceMaterial {
   const flakes: FlakeSettings = { ...DEFAULT_FLAKES, ...flakeSettings };
@@ -127,7 +134,7 @@ export function createDiceMaterial(flakeSettings?: Partial<FlakeSettings>): Dice
     // A near-mirror clearcoat put a blown highlight across whole faces and hid
     // the very numbers the reveal is meant to show; this spreads it out.
     clearcoat: 0.62,
-    clearcoatRoughness: 0.26,
+    clearcoatRoughness: CLEARCOAT_ROUGHNESS,
     sheen: 0.2,
     sheenRoughness: 0.4,
     envMapIntensity: 1.1,
@@ -146,15 +153,18 @@ export function createDiceMaterial(flakeSettings?: Partial<FlakeSettings>): Dice
       .replace('#include <opaque_fragment>', `${FLAKE_FRAGMENT}\n#include <opaque_fragment>`);
   };
 
-  let clearcoatDetail: THREE.Texture | null = null;
   return {
     material,
-    setClearcoatDetail(map) {
-      if (map === clearcoatDetail) return;
-      clearcoatDetail = map;
-      if (map) map.repeat.set(CLEARCOAT_DETAIL_REPEAT, CLEARCOAT_DETAIL_REPEAT);
-      material.clearcoatNormalMap = map;
-      material.clearcoatNormalScale.set(0.25, 0.25);
+    setClearcoatDetail(normal, smudge) {
+      if (normal === material.clearcoatNormalMap && smudge === material.clearcoatRoughnessMap) return;
+      if (normal) normal.repeat.set(CLEARCOAT_DETAIL_REPEAT, CLEARCOAT_DETAIL_REPEAT);
+      // The prints tile at a different count from the peel, so the two never
+      // line up and neither repeat shows.
+      if (smudge) smudge.repeat.set(CLEARCOAT_DETAIL_REPEAT * 0.7, CLEARCOAT_DETAIL_REPEAT * 0.7);
+      material.clearcoatNormalMap = normal;
+      material.clearcoatNormalScale.set(0.3, 0.3);
+      material.clearcoatRoughnessMap = smudge;
+      material.clearcoatRoughness = smudge ? CLEARCOAT_ROUGHNESS / SMUDGE_BASE : CLEARCOAT_ROUGHNESS;
       material.needsUpdate = true;
     },
     setFlakes(next) {

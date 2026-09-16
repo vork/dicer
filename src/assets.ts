@@ -160,8 +160,17 @@ export async function loadTrayTextures(anisotropy: number, large = false): Promi
  * normal map, tiled over the atlas. Null if not built.
  */
 export async function loadClearcoatDetail(anisotropy: number): Promise<THREE.Texture | null> {
+  return loadTile(`${BASE}clearcoat-detail.webp`, anisotropy);
+}
+
+/** Fingerprints and smudges as a roughness map, for the dice's coat and the coin. Null if not built. */
+export async function loadSmudgeDetail(anisotropy: number): Promise<THREE.Texture | null> {
+  return loadTile(`${BASE}smudge-detail.webp`, anisotropy);
+}
+
+async function loadTile(url: string, anisotropy: number): Promise<THREE.Texture | null> {
   try {
-    const texture = await new THREE.TextureLoader().loadAsync(`${BASE}clearcoat-detail.webp`);
+    const texture = await new THREE.TextureLoader().loadAsync(url);
     texture.flipY = false;
     texture.colorSpace = THREE.NoColorSpace;
     texture.anisotropy = anisotropy;

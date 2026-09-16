@@ -32,11 +32,22 @@ const TILE_UNITS = {
  * roughness variations are kept subtle.
  */
 const DETAIL_TILE_UNITS = { felt: 1.0, leather: 0.75, wood: 1.0 };
+// The felt's nap is carried by its tone more than its bump — a felt is flat
+// to the light — and the leather's photographed grain leads, with the baked
+// pebbles only filling in below it.
 const DETAIL_LOOK = {
-  felt: { bump: 1.4, rough: 0.5, tint: 0.9 },
-  leather: { bump: 1.0, rough: 0.6, tint: 0.6 },
+  felt: { bump: 0.6, rough: 0.5, tint: 1.0 },
+  leather: { bump: 0.45, rough: 0.4, tint: 0.35 },
   wood: { bump: 0.8, rough: 0.5, tint: 0.6 },
 };
+
+/**
+ * Surfaces whose 2048 map keeps the 1024 tile size rather than doubling it:
+ * twice the texels a centimetre instead of half the repeats. The leather is
+ * the one the eye lands on up close, where 100 texels a centimetre blurred
+ * past the reveal's 170 screen pixels; at 205 it holds.
+ */
+const DENSE_LARGE = new Set<keyof typeof TILE_UNITS>(['leather']);
 
 /**
  * Tray dimensions in world units. One unit is roughly 20mm — the scale the asset
@@ -148,7 +159,7 @@ export function createTray(textures: TrayTextures | null = null): Tray {
     const maps = textures?.[surface];
     if (!maps) return;
     const width = (maps.map.image as { width?: number } | undefined)?.width ?? 1024;
-    mapTileUnits[surface] = TILE_UNITS[surface] * (width / 1024);
+    mapTileUnits[surface] = TILE_UNITS[surface] * (DENSE_LARGE.has(surface) ? 1 : width / 1024);
     const repeat = perUnit / mapTileUnits[surface];
     for (const map of [maps.map, maps.normalMap, maps.armMap]) map.repeat.set(repeat, repeat);
   };
@@ -184,7 +195,9 @@ export function createTray(textures: TrayTextures | null = null): Tray {
     metalness: 0,
     map: textures?.felt.map ?? null,
     normalMap: textures?.felt.normalMap ?? felt.normalMap,
-    normalScale: new THREE.Vector2(1.1, 1.1),
+    // A felt lies flat to the light; the cloth's loops, five times finer than
+    // life here, would otherwise read as a knit.
+    normalScale: textures ? new THREE.Vector2(0.5, 0.5) : new THREE.Vector2(1.1, 1.1),
     roughnessMap: textures?.felt.armMap ?? felt.roughnessMap,
     sheen: 0.75,
     sheenRoughness: 0.85,
@@ -227,9 +240,10 @@ export function createTray(textures: TrayTextures | null = null): Tray {
 
   const wallMaterial = new THREE.MeshPhysicalMaterial({
     // The leather map carries its own brown; the tint only takes it down to
-    // the tray's dark room.
-    color: textures ? 0x8c8078 : 0x322820,
-    roughness: textures ? 1 : 0.62,
+    // the tray's dark room. Its roughness map averages 0.66, dry for a
+    // finished hide, so it is scaled toward the satin a real one has.
+    color: textures ? 0xa0948a : 0x322820,
+    roughness: textures ? 0.82 : 0.62,
     metalness: 0,
     map: textures?.leather.map ?? null,
     normalMap: textures?.leather.normalMap ?? leather.normalMap,
