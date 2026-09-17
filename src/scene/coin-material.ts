@@ -417,7 +417,9 @@ float coinWallDistance = (coinP.y > 0.0 ? coinWear.r : coinWear.g) * COIN_WEAR_R
 float coinFoot = 1.0 - smoothstep(0.0, 0.1, coinWallDistance);
 float coinFootprint = length(fwidth(coinP));
 float coinGrungeAmount = coinGrunge(coinP, coinFootprint);
-float coinBlotch = coinFbm(coinP * 9.0 + vec3(3.1, 7.7, 1.3));
+// Patches of a millimetre or so, not two: at the reveal's range the coarser
+// ones read as flakes of something rather than as toning.
+float coinBlotch = coinFbm(coinP * 15.0 + vec3(3.1, 7.7, 1.3));
 // The grunge eats into the grime's edges and thins it in flecks, so its
 // patches are ragged rather than soft.
 float coinGrime = uCoinGrime * coinCavity

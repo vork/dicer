@@ -407,13 +407,16 @@ export function bakeFace({ baseHeight, size, extent, rim, seed }) {
   // Dents, kept off the rim. The rim is the most evenly worn part of a coin,
   // and it is domed and polished, so every dent that landed on it broke its
   // highlight into a blob that read from across the tray as a fault.
-  for (let n = 0; n < 70; n++) {
+  // Small: a handling mark is a few tenths of a millimetre. The first bake's
+  // ran to 0.7mm in radius and, stretched, past 2mm across, and up close their
+  // smooth bowls caught the light like droplets on the relief.
+  for (let n = 0; n < 120; n++) {
     const a = random() * Math.PI * 2;
-    const radiusUnits = 0.008 + random() ** 2 * 0.028;
+    const radiusUnits = 0.004 + random() ** 2 * 0.012;
     const r = Math.sqrt(random()) * (rim - 0.1 - radiusUnits);
     const x = Math.cos(a) * r, z = Math.sin(a) * r;
     const radius = radiusUnits / texel;
-    const depth = 0.003 + random() * 0.008;
+    const depth = 0.002 + random() * 0.005;
     bowl(height, dents, 1, grid, false, toTexel(x), toTexel(z), radius, depth, random);
   }
   // A few nicks on the rim: shallow, since at the reveal's distance a deep one

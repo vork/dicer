@@ -1640,6 +1640,16 @@ tile rather than doubling it, 205 texels a centimetre against the reveal's
 pebbles sit under it at half strength, and the hide's roughness map, dry at
 0.66, is scaled toward the satin a finished leather has.
 
+### Its marks, at close range
+
+Up close the first bake's dents read as blisters: radii of 0.16 to 0.72mm,
+stretched up to 1.8x, so the larger ones ran past 2mm across on a 25mm coin,
+and their smooth bowls caught the light like droplets on the relief. A
+handling mark is a few tenths of a millimetre, so they are now 120 at 0.08
+to 0.32mm in radius and shallower, and the toning's blotches run at a
+millimetre rather than two — at the reveal's range the coarser ones read as
+flakes of something rather than as toning.
+
 ## Credits
 
 Coin metal: [Metal007](https://ambientcg.com/view?id=Metal007) from
