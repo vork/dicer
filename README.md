@@ -212,10 +212,18 @@ dimming at once.
 Up close you get the flake size the paint actually has; further away you get the
 same speck size on screen drawn from a coarser lattice — a fair sample of the same
 distribution rather than a blur of it, so the dice stay sparkly at any distance.
-`density` is now a ceiling rather than a promise: at 240 flakes per unit a flake
-is about 0.08mm on a 20mm die, the right order for real metallic paint, and how
-much of that detail survives is the camera's business rather than the setting's.
+`density` is now a ceiling rather than a promise: at 400 flakes per unit a flake
+is 0.05mm on a 20mm die, the size of real metallic-paint flake, and how much of
+that detail survives is the camera's business rather than the setting's.
 `grain` is the knob that decides how big a speck looks, and it does it in pixels.
+
+The defaults were retuned on the contact sheet against the reveal's range once
+the rest of the scene had caught up. The first ones — 240 a unit, three-quarter
+coverage, a ceiling of two, a 1.2-pixel grain — drew a starfield of uniform
+two-pixel white dots on every die. Real flake in resin is finer, sparser and
+mostly below white: 400 a unit, a one-pixel grain, 35% coverage, a ceiling of
+1.5 and a little less strength leave fewer, finer glints that still fire as the
+die turns.
 
 Getting the footprint right matters more than it sounds, since it now picks the
 mip level: `fwidth` sums both derivatives across all three components and reads

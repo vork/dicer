@@ -28,9 +28,8 @@ export interface FlakeSettings {
   /** Overall brightness of the sparkle. 0 turns it off entirely. */
   strength: number;
   /**
-   * Flakes per world unit at full detail; a die is one unit, or about 20mm. 240
-   * puts a flake at roughly 0.08mm, which is the right order for real metallic
-   * paint. It is a ceiling rather than a promise: what actually gets drawn is
+   * Flakes per world unit at full detail; a die is one unit, or about 20mm. 400
+   * puts a flake at 0.05mm, which is the size of real metallic-paint flake. It is a ceiling rather than a promise: what actually gets drawn is
    * this lattice coarsened until a flake is `grain` pixels across, so the number
    * only bites when the camera is close enough to resolve it.
    */
@@ -77,15 +76,19 @@ export interface FlakeSettings {
 }
 
 export const DEFAULT_FLAKES: FlakeSettings = {
-  strength: 1.7,
-  density: 240,
+  // Tuned on the contact sheet (tools/flake-sheet.mjs) against the reveal's
+  // range. The first settings — 240 a unit, three-quarter coverage, a ceiling
+  // of two — drew a starfield of uniform two-pixel white dots; real flake in
+  // resin is finer, sparser, and mostly below white.
+  strength: 1.25,
+  density: 400,
   spread: 1.3,
   polish: 0.01,
-  coverage: 0.75,
+  coverage: 0.35,
   tint: 0.4,
-  contrast: 3,
-  ceiling: 2,
-  grain: 1.2,
+  contrast: 2.6,
+  ceiling: 1.5,
+  grain: 1.0,
 };
 
 export interface DiceMaterial {
