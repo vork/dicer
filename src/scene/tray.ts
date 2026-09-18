@@ -69,8 +69,8 @@ export const TRAY = {
    * this all round — see PLAY.
    */
   wallInset: 0.16,
-  /** Radius of the roundover along the top of the wall, inside and out. */
-  rimRadius: 0.4,
+  /** Radius of the roundover along the top of the wall, inside and out: 4mm, a softened edge rather than a padded one. */
+  rimRadius: 0.2,
   floorY: 0,
 };
 
@@ -386,23 +386,6 @@ export function createTray(textures: TrayTextures | null = null): Tray {
   walls.castShadow = true;
   walls.receiveShadow = true;
   group.add(walls);
-
-  // --- thin gold bead along the inner lip --------------------------------
-  // Piping laid into the crown of the inner roundover, half sunk into the
-  // leather, so it catches the light as a line along the rim.
-  const crown = Math.PI / 4;
-  const lipPoints = ring(insideD + rim - rim * Math.cos(crown)).map((p) => new THREE.Vector3(p.x, 0, p.z));
-  const lip = new THREE.Mesh(
-    new THREE.TubeGeometry(new THREE.CatmullRomCurve3(lipPoints, true, 'centripetal'), 240, 0.035, 8, true),
-    new THREE.MeshPhysicalMaterial({
-      color: 0x9d7c3c,
-      roughness: 0.28,
-      metalness: 1,
-      envMapIntensity: 1.6,
-    }),
-  );
-  lip.position.y = top - rim + rim * Math.sin(crown);
-  group.add(lip);
 
   // --- pedestal beneath, so the tray reads as an object on a surface ------
   // Only its ledge and rounded edge can ever be seen, so that is all there is:

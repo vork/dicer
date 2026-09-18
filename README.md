@@ -1600,7 +1600,7 @@ edges down further.
 
 The wall is not extruded; it is a cross-section swept around the opening. The
 section climbs the inner face from the felt, rolls over the top in a quarter
-circle of 0.4 units (8mm), crosses the flat of the rim, rolls down the outside
+circle of 0.2 units (4mm), crosses the flat of the rim, rolls down the outside
 the same way and stops on the pedestal with a small roll at its foot. Every
 point of it becomes a ring — the opening's outline grown by that point's
 offset, with true corner arcs about the same centres, so the wall is as thick at
@@ -1619,11 +1619,12 @@ the two, which splits the difference at 1.8 either way, over a 1.7cm arc on
 the inside.
 
 The extrude also ran 0.36 units taller than `wallHeight` said, because a bevel
-adds its thickness at both ends. The gold bead along the inner lip was laid at
+adds its thickness at both ends. A gold bead along the inner lip was laid at
 `wallHeight`, which put it 0.19 units inside the leather, and nothing of it was
-ever seen. The wall is now exactly `wallHeight` tall, and the bead is piping
-laid into the crown of the inner roundover, half sunk, where it catches the
-light as a line along the rim.
+ever seen; brought out onto the roundover it read as a saturated brass line
+against the leather, so it is gone. The wall is now exactly `wallHeight` tall,
+and the rim is leather all the way over. An 8mm roundover was tried first and
+read as padding; 4mm softens the edge and leaves it an edge.
 
 ## Micro detail
 
