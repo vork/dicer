@@ -366,19 +366,21 @@ imported from the app so the two cannot drift apart, and it checks that the die'
 near-bottom is visible rather than only its centre, which is the difference
 between seeing a die and seeing the top half of one.
 
-The tray a die is allowed to touch is not the tray in `tray.ts`. `ExtrudeGeometry`'s
-bevel rounds the wall's top and bottom edges, but it also pulls the whole inner
-face inward by `bevelSize` along its full height, and the opening's corners are
-filleted while four flat collider planes meet at a point. So the leather you can
-see stood 0.16 units inside the wall the physics used, and 0.28 at a corner —
-every die that came to rest against a wall was buried a third of its width into
-it, worst exactly where dice pile up.
+The tray a die is allowed to touch was, for a while, not the tray in `tray.ts`.
+The wall was an `ExtrudeGeometry` whose bevel rounded its top and bottom edges
+but also pulled the whole inner face inward by `bevelSize` along its full
+height, and the opening's corners are filleted while four flat collider planes
+meet at a point. So the leather you could see stood 0.16 units inside the wall
+the physics used, and 0.28 at a corner — every die that came to rest against a
+wall was buried a third of its width into it, worst exactly where dice pile up.
 
 `PLAY` in `tray.ts` is the boundary that actually exists: the nominal opening less
-the bevel, with the fillet shrunk to match. The colliders are built from it, three
-chord planes per corner standing in for each fillet — cutting at most 0.02 units
-inside the true arc, a fortieth of a die — and the camera measures the rim from it
-too, since the rim that blocks a sight line is the one you can see.
+`wallInset`, with the fillet shrunk to match. The colliders are built from it,
+three chord planes per corner standing in for each fillet — cutting at most 0.02
+units inside the true arc, a fortieth of a die — and the camera measures the rim
+from it too, since the rim that blocks a sight line is the one you can see. The
+wall is now swept from the same figures (see "The rim"), so the inset is no
+longer a side effect of a bevel but where the leather is put on purpose.
 
 `npm run verify:tray` keeps the two honest by measuring both rather than trusting
 either: it raycasts the built wall geometry and, along the same headings, the
@@ -820,10 +822,11 @@ the eye cannot see was kept:
 - **The ground and the pedestal no longer look up the shadow map.** Both are
   nearly black, and the wall's shadow on them measured a mean difference of
   0.03 levels across the frame, for 4% of the scene pass.
-- **The pedestal has no top face.** It sits under the floor and the walls,
+- **The pedestal has no top face.** It sat under the floor and the walls,
   never seen, and a GPU without early depth rejection shaded all of it before
   throwing it away; drawing the pedestal last changed nothing, so the face is
-  simply not there.
+  simply not there. The pedestal is now only the ledge and edge that show past
+  the wall, swept the same way as the wall itself.
 
 What the round also found and left alone: the ground is 44% of the scene
 pass purely by area — its normal map, environment lookup and shadow taps run
@@ -1592,6 +1595,35 @@ map's mean. The floor's baked occlusion (see "Ambient occlusion") is kept as
 its `aoMap` on the second UV set, above the cloth's own. The wood is barely
 tinted: the photograph is dark already and the vignette and fog take the
 edges down further.
+
+### The rim
+
+The wall is not extruded; it is a cross-section swept around the opening. The
+section climbs the inner face from the felt, rolls over the top in a quarter
+circle of 0.4 units (8mm), crosses the flat of the rim, rolls down the outside
+the same way and stops on the pedestal with a small roll at its foot. Every
+point of it becomes a ring — the opening's outline grown by that point's
+offset, with true corner arcs about the same centres, so the wall is as thick at
+a corner as along a side — and neighbouring rings are joined into quads. The
+extrude's bevel was a four-facet chamfer, and since `ExtrudeGeometry` shares no
+vertices between faces it shaded as four flat bands with a texture seam at each
+crease, which is what a close look at the rim showed. The swept rim carries
+the section's own normals, so twelve segments shade as one curve, and it
+carries one unwrap: `u` runs around the tray, a whole number of leather tiles
+so the seam closes, and `v` runs across the section from the felt over the top
+to the pedestal, the way a hide is wrapped over a rim. Rings at different
+offsets have different perimeters and one `u` between them, so the grain is
+pressed together a little around the inner corners and drawn out around the
+outer ones; `u` follows the ring whose corner radius is the geometric mean of
+the two, which splits the difference at 1.8 either way, over a 1.7cm arc on
+the inside.
+
+The extrude also ran 0.36 units taller than `wallHeight` said, because a bevel
+adds its thickness at both ends. The gold bead along the inner lip was laid at
+`wallHeight`, which put it 0.19 units inside the leather, and nothing of it was
+ever seen. The wall is now exactly `wallHeight` tall, and the bead is piping
+laid into the crown of the inner roundover, half sunk, where it catches the
+light as a line along the rim.
 
 ## Micro detail
 

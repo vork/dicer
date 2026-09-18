@@ -62,11 +62,15 @@ export const TRAY = {
   /** Corner radius of the opening. */
   innerFillet: 0.7,
   /**
-   * The extrude bevel on the wall ring. It rounds the top and bottom edges, but
-   * it also pulls the whole inner face in by this much, so the leather you can
-   * see is not where `innerWidth` says it is — see PLAY.
+   * How far inside the nominal opening the leather stands. The nominal figures
+   * size the felt, the lights and the throws; the wall's cross-section starts
+   * this far inside them and runs `wallThickness` plus twice this outward, so
+   * the wall you see is ~23 mm thick and the play area is the opening less
+   * this all round — see PLAY.
    */
-  wallBevel: 0.16,
+  wallInset: 0.16,
+  /** Radius of the roundover along the top of the wall, inside and out. */
+  rimRadius: 0.4,
   floorY: 0,
 };
 
@@ -74,17 +78,16 @@ export const TRAY = {
  * Where a die may actually come to rest: the surface a player can see, not the
  * nominal opening.
  *
- * ExtrudeGeometry's bevel insets the hole along its whole height, so the visible
- * leather stands `wallBevel` proud of `innerWidth / 2`. Colliders built on the
- * nominal figure let every die resting against a wall sink that far into it, and
- * more at a corner, where the visible fillet cuts the sharp corner off as well.
- * Both were measured by raycasting the built geometry rather than derived from
- * the extrude options, and `npm run verify:tray` keeps them honest.
+ * The wall's inner face stands `wallInset` inside `innerWidth / 2`, with the
+ * fillet shrunk to match. Colliders built on the nominal figure would let every
+ * die resting against a wall sink that far into it, and more at a corner. The
+ * wall is swept from these same figures, and `npm run verify:tray` measures
+ * both the built geometry and the physics world rather than trusting either.
  */
 export const PLAY = {
-  halfWidth: TRAY.innerWidth / 2 - TRAY.wallBevel,
-  halfDepth: TRAY.innerDepth / 2 - TRAY.wallBevel,
-  fillet: TRAY.innerFillet - TRAY.wallBevel,
+  halfWidth: TRAY.innerWidth / 2 - TRAY.wallInset,
+  halfDepth: TRAY.innerDepth / 2 - TRAY.wallInset,
+  fillet: TRAY.innerFillet - TRAY.wallInset,
 };
 
 function roundedRect(width: number, depth: number, radius: number): THREE.Shape {
@@ -124,26 +127,152 @@ export type TrayDetail = 'full' | 'lite';
 const WALL_UV_SCALE = 0.28;
 /** The ground disc, in world units. */
 const GROUND_DIAMETER = 140;
+/** How far below the felt the pedestal's ledge sits, so the wall's foot stands on it. */
+const PEDESTAL_DROP = 0.06;
 
 /**
- * Extrudes a flat profile into an upright solid.
- *
- * ExtrudeGeometry builds along +Z, so the profile has to be laid down; rotating
- * -90 degrees about X maps +Z onto +Y. The bevel makes the result overshoot the
- * requested depth at both ends, so the solid is then anchored by its measured
- * bounding box rather than by the nominal depth.
+ * A point on a cross-section swept around the opening: how far outside the
+ * nominal opening it stands, its height, and the section's outward normal there.
  */
-function extrudeUpright(
-  shape: THREE.Shape,
-  options: THREE.ExtrudeGeometryOptions,
-  anchor: 'above' | 'below',
-): THREE.BufferGeometry {
-  const geometry = new THREE.ExtrudeGeometry(shape, options);
-  geometry.rotateX(-Math.PI / 2);
-  geometry.computeBoundingBox();
-  const box = geometry.boundingBox!;
-  geometry.translate(0, anchor === 'above' ? -box.min.y : -box.max.y, 0);
+interface ProfilePoint {
+  d: number;
+  y: number;
+  nd: number;
+  ny: number;
+}
+
+/** Segments on each of the four corner arcs of a swept ring. */
+const CORNER_SEGMENTS = 24;
+
+/**
+ * The opening's outline grown by `offset` on every side: the same corner
+ * centres, straight sides of the same length, corner arcs of a larger radius.
+ * Every ring so built has the same number of points, at the same parameters,
+ * so rings at different offsets can be joined into a surface.
+ *
+ * True arcs, not the quadratic curves `roundedRect` draws: the colliders stand
+ * in for arcs of `PLAY.fillet`, and the wall has to be the surface they
+ * approximate.
+ */
+function ring(offset: number): { x: number; z: number; ox: number; oz: number }[] {
+  const cx = TRAY.innerWidth / 2 - TRAY.innerFillet;
+  const cz = TRAY.innerDepth / 2 - TRAY.innerFillet;
+  const radius = TRAY.innerFillet + offset;
+  const points: { x: number; z: number; ox: number; oz: number }[] = [];
+  const corners = [
+    [cx, cz],
+    [-cx, cz],
+    [-cx, -cz],
+    [cx, -cz],
+  ];
+  corners.forEach(([px, pz], corner) => {
+    for (let i = 0; i <= CORNER_SEGMENTS; i++) {
+      const angle = ((corner + i / CORNER_SEGMENTS) * Math.PI) / 2;
+      const ox = Math.cos(angle);
+      const oz = Math.sin(angle);
+      points.push({ x: px + radius * ox, z: pz + radius * oz, ox, oz });
+    }
+  });
+  return points;
+}
+
+/**
+ * Sweeps a cross-section around the opening into a surface: one ring per
+ * profile point, quads between neighbouring rings.
+ *
+ * Normals come from the profile, not from the triangles, so a roundover shades
+ * as the curve it is rather than as the facets that approximate it. The UVs
+ * unwrap the sweep the way a hide is wrapped over a rim: u runs around the
+ * tray, an exact whole number of tiles so the seam closes, and v runs across
+ * the section from its first point, both in world units times `uvScale`. Rings
+ * at different offsets have different perimeters and one u between them, so
+ * the grain is compressed a little around the inner corners and stretched
+ * around the outer ones; u follows the ring whose corner radius is the
+ * geometric mean of the two extremes, which splits the difference.
+ */
+function sweepAroundOpening(profile: ProfilePoint[], uvScale: number): THREE.BufferGeometry {
+  const around = ring(0).length;
+  const columns = around + 1;
+
+  const offsets = profile.map((p) => p.d);
+  const reference = Math.sqrt(
+    (TRAY.innerFillet + Math.min(...offsets)) * (TRAY.innerFillet + Math.max(...offsets)),
+  );
+  const guide = ring(reference - TRAY.innerFillet);
+  const along: number[] = [0];
+  for (let i = 0; i < around; i++) {
+    const a = guide[i];
+    const b = guide[(i + 1) % around];
+    along.push(along[i] + Math.hypot(b.x - a.x, b.z - a.z));
+  }
+  const perimeter = along[around];
+  const tiles = Math.max(1, Math.round(perimeter * uvScale));
+  const u = along.map((s) => (tiles * s) / perimeter);
+
+  const across: number[] = [0];
+  for (let i = 1; i < profile.length; i++) {
+    const a = profile[i - 1];
+    const b = profile[i];
+    across.push(across[i - 1] + Math.hypot(b.d - a.d, b.y - a.y));
+  }
+
+  const rows = profile.length;
+  const position = new Float32Array(rows * columns * 3);
+  const normal = new Float32Array(rows * columns * 3);
+  const uv = new Float32Array(rows * columns * 2);
+  profile.forEach((point, row) => {
+    const points = ring(point.d);
+    for (let column = 0; column < columns; column++) {
+      const p = points[column % around];
+      const at = row * columns + column;
+      position[at * 3] = p.x;
+      position[at * 3 + 1] = point.y;
+      position[at * 3 + 2] = p.z;
+      normal[at * 3] = point.nd * p.ox;
+      normal[at * 3 + 1] = point.ny;
+      normal[at * 3 + 2] = point.nd * p.oz;
+      uv[at * 2] = u[column];
+      uv[at * 2 + 1] = across[row] * uvScale;
+    }
+  });
+
+  const index: number[] = [];
+  for (let row = 0; row < rows - 1; row++) {
+    for (let column = 0; column < columns - 1; column++) {
+      const a = row * columns + column;
+      const b = a + 1;
+      const c = a + columns + 1;
+      const d = a + columns;
+      index.push(a, b, c, a, c, d);
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(position, 3));
+  geometry.setAttribute('normal', new THREE.BufferAttribute(normal, 3));
+  geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  geometry.setIndex(index);
+  geometry.computeBoundingSphere();
   return geometry;
+}
+
+/** A quarter circle of the profile, from the direction `from` to `to`, with the normals along it. */
+function roundover(
+  centreD: number,
+  centreY: number,
+  radius: number,
+  from: number,
+  to: number,
+  segments: number,
+): ProfilePoint[] {
+  const points: ProfilePoint[] = [];
+  for (let i = 0; i <= segments; i++) {
+    const angle = from + ((to - from) * i) / segments;
+    const nd = Math.cos(angle);
+    const ny = Math.sin(angle);
+    points.push({ d: centreD + radius * nd, y: centreY + radius * ny, nd, ny });
+  }
+  return points;
 }
 
 export function createTray(textures: TrayTextures | null = null): Tray {
@@ -183,7 +312,6 @@ export function createTray(textures: TrayTextures | null = null): Tray {
   tile('wood', GROUND_DIAMETER);
 
   const inner = { w: TRAY.innerWidth, d: TRAY.innerDepth };
-  const outer = { w: inner.w + TRAY.wallThickness * 2, d: inner.d + TRAY.wallThickness * 2 };
 
   // --- floor -------------------------------------------------------------
   const floorMaterial = new THREE.MeshPhysicalMaterial({
@@ -219,24 +347,23 @@ export function createTray(textures: TrayTextures | null = null): Tray {
   group.add(floor);
 
   // --- wall ring ---------------------------------------------------------
-  const wallShape = roundedRect(outer.w, outer.d, 1.3);
-  wallShape.holes.push(roundedRect(inner.w, inner.d, TRAY.innerFillet));
-
-  const wallGeometry = extrudeUpright(
-    wallShape,
-    {
-      depth: TRAY.wallHeight,
-      bevelEnabled: true,
-      bevelThickness: 0.18,
-      bevelSize: TRAY.wallBevel,
-      bevelSegments: 4,
-      curveSegments: 24,
-    },
-    'above',
-  );
-  wallGeometry.translate(0, TRAY.floorY, 0);
-  // Extruded sides carry no useful UVs for a tiling grain, so derive box UVs.
-  applyBoxUv(wallGeometry, WALL_UV_SCALE);
+  // A cross-section swept around the opening: the inner face rises from the
+  // felt, rolls over the top in a quarter circle, crosses the flat of the rim,
+  // rolls down the outside and stops on the pedestal. One smooth surface, so
+  // the rim reads as a rounded edge rather than a run of chamfers.
+  const rim = TRAY.rimRadius;
+  const top = TRAY.floorY + TRAY.wallHeight;
+  const insideD = -TRAY.wallInset;
+  const outsideD = TRAY.wallThickness + TRAY.wallInset;
+  const footY = TRAY.floorY - PEDESTAL_DROP;
+  const footRadius = 0.08;
+  const wallProfile: ProfilePoint[] = [
+    { d: insideD, y: TRAY.floorY, nd: -1, ny: 0 },
+    ...roundover(insideD + rim, top - rim, rim, Math.PI, Math.PI / 2, 12),
+    ...roundover(outsideD - rim, top - rim, rim, Math.PI / 2, 0, 12),
+    ...roundover(outsideD - footRadius, footY + footRadius, footRadius, 0, -Math.PI / 2, 3),
+  ];
+  const wallGeometry = sweepAroundOpening(wallProfile, WALL_UV_SCALE);
 
   const wallMaterial = new THREE.MeshPhysicalMaterial({
     // The leather map carries its own brown; the tint only takes it down to
@@ -261,9 +388,12 @@ export function createTray(textures: TrayTextures | null = null): Tray {
   group.add(walls);
 
   // --- thin gold bead along the inner lip --------------------------------
-  const lipShape = roundedRect(inner.w + 0.06, inner.d + 0.06, TRAY.innerFillet + 0.02);
+  // Piping laid into the crown of the inner roundover, half sunk into the
+  // leather, so it catches the light as a line along the rim.
+  const crown = Math.PI / 4;
+  const lipPoints = ring(insideD + rim - rim * Math.cos(crown)).map((p) => new THREE.Vector3(p.x, 0, p.z));
   const lip = new THREE.Mesh(
-    new THREE.TubeGeometry(shapeToCurve(lipShape), 240, 0.035, 8, true),
+    new THREE.TubeGeometry(new THREE.CatmullRomCurve3(lipPoints, true, 'centripetal'), 240, 0.035, 8, true),
     new THREE.MeshPhysicalMaterial({
       color: 0x9d7c3c,
       roughness: 0.28,
@@ -271,31 +401,24 @@ export function createTray(textures: TrayTextures | null = null): Tray {
       envMapIntensity: 1.6,
     }),
   );
-  lip.position.y = TRAY.floorY + TRAY.wallHeight;
+  lip.position.y = top - rim + rim * Math.sin(crown);
   group.add(lip);
 
   // --- pedestal beneath, so the tray reads as an object on a surface ------
-  const baseShape = roundedRect(outer.w + 0.5, outer.d + 0.5, 1.5);
-  const baseGeometry = extrudeUpright(
-    baseShape,
-    {
-      depth: 0.5,
-      bevelEnabled: true,
-      bevelThickness: 0.12,
-      bevelSize: 0.12,
-      bevelSegments: 3,
-      curveSegments: 20,
-    },
-    // Hangs below the floor, so only its lip shows past the wall. The small gap
-    // keeps its top face out of the floor plane, which would otherwise z-fight.
-    'below',
-  );
-  baseGeometry.translate(0, TRAY.floorY - 0.06, 0);
-  // Its top face is under the floor and the walls, never seen, and a GPU with
-  // no early depth rejection shades all of it before throwing it away: hiding
-  // the whole pedestal took 15% off the scene pass on tools/bench.mjs, and
-  // drawing it last changed nothing. So the face is simply not there.
-  dropTopFace(baseGeometry);
+  // Only its ledge and rounded edge can ever be seen, so that is all there is:
+  // a ledge tucked under the wall's foot, an edge, and a side down to the
+  // table. A closed solid's top face would run under the whole floor, and a
+  // GPU with no early depth rejection shades all of it before throwing it
+  // away — hiding the old pedestal took 15% off the scene pass on
+  // tools/bench.mjs.
+  const ledge = 0.25;
+  const edgeRadius = 0.12;
+  const baseProfile: ProfilePoint[] = [
+    { d: outsideD - 0.05, y: footY, nd: 0, ny: 1 },
+    ...roundover(outsideD + ledge - edgeRadius, footY - edgeRadius, edgeRadius, Math.PI / 2, 0, 4),
+    { d: outsideD + ledge, y: footY - 0.5, nd: 1, ny: 0 },
+  ];
+  const baseGeometry = sweepAroundOpening(baseProfile, 1);
   const base = new THREE.Mesh(
     baseGeometry,
     new THREE.MeshPhysicalMaterial({ color: 0x0c0d11, roughness: 0.55, metalness: 0.2, envMapIntensity: 0.5 }),
@@ -373,67 +496,4 @@ export function createTray(textures: TrayTextures | null = null): Tray {
   };
 }
 
-/**
- * Removes the triangles that make up a solid's flat top: every face whose
- * three normals point straight up and whose vertices all sit at the highest y.
- * The bevel around the top is kept; only the cap goes.
- */
-function dropTopFace(geometry: THREE.BufferGeometry) {
-  const position = geometry.attributes.position as THREE.BufferAttribute;
-  const normal = geometry.attributes.normal as THREE.BufferAttribute;
-  let top = -Infinity;
-  for (let i = 0; i < position.count; i++) top = Math.max(top, position.getY(i));
-  const onTop = (i: number) => normal.getY(i) > 0.999 && position.getY(i) > top - 1e-4;
-  const kept: number[] = [];
-  const index = geometry.index;
-  const triangles = index ? index.count / 3 : position.count / 3;
-  for (let t = 0; t < triangles; t++) {
-    const a = index ? index.getX(t * 3) : t * 3;
-    const b = index ? index.getX(t * 3 + 1) : t * 3 + 1;
-    const c = index ? index.getX(t * 3 + 2) : t * 3 + 2;
-    if (onTop(a) && onTop(b) && onTop(c)) continue;
-    kept.push(a, b, c);
-  }
-  geometry.setIndex(kept);
-}
 
-/** Planar UVs picked per-triangle from the dominant normal axis. */
-function applyBoxUv(geometry: THREE.BufferGeometry, scale: number) {
-  const position = geometry.attributes.position as THREE.BufferAttribute;
-  const normal = geometry.attributes.normal as THREE.BufferAttribute;
-  const uv = new Float32Array(position.count * 2);
-  for (let i = 0; i < position.count; i++) {
-    const nx = Math.abs(normal.getX(i));
-    const ny = Math.abs(normal.getY(i));
-    const nz = Math.abs(normal.getZ(i));
-    const x = position.getX(i);
-    const y = position.getY(i);
-    const z = position.getZ(i);
-    let u: number;
-    let v: number;
-    if (ny >= nx && ny >= nz) {
-      u = x; v = z;
-    } else if (nx >= nz) {
-      u = z; v = y;
-    } else {
-      u = x; v = y;
-    }
-    uv[i * 2] = u * scale;
-    uv[i * 2 + 1] = v * scale;
-  }
-  geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
-}
-
-/** Samples a flat Shape into an XZ-plane curve for the lip tube. */
-function shapeToCurve(shape: THREE.Shape): THREE.CurvePath<THREE.Vector3> {
-  const points = shape.getSpacedPoints(240);
-  const curve = new THREE.CatmullRomCurve3(
-    points.map((p) => new THREE.Vector3(p.x, 0, p.y)),
-    true,
-    'catmullrom',
-    0.02,
-  );
-  const path = new THREE.CurvePath<THREE.Vector3>();
-  path.add(curve);
-  return path;
-}

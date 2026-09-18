@@ -227,8 +227,8 @@ export class DiceWorld {
 
   private buildTray() {
     const { rapier, world } = this;
-    // The play area, not the nominal opening: the wall's extrude bevel pulls the
-    // visible leather inward, and a collider on the nominal figure buries every
+    // The play area, not the nominal opening: the visible leather stands
+    // `wallInset` inside it, and a collider on the nominal figure buries every
     // die that rests against a wall.
     const halfWidth = PLAY.halfWidth;
     const halfDepth = PLAY.halfDepth;
